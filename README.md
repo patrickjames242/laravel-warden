@@ -9,54 +9,120 @@ authorization across route middleware, targeted checks, and **query scoping**,
 so unauthorized rows never hydrate. Where permissions are *stored* is entirely
 up to you: Warden asks a `PermissionResolver` you provide.
 
+## The permission string
+
+Every grant in Warden is a dot-notation string with two to three segments:
+
+```
+base.ability                 timesheets.view
+base.*                       timesheets.*                          (every ability on the resource)
+base.condition.ability       timesheets.is_department_manager.update
+base.condition.*             course_sections.is_department_head.*
+```
+
+- **`base`** — the resource, i.e. a policy's base name (`course_sections`,
+  `students`, `timesheets`), or a capability with no records (`settings`).
+- **`ability`** — the verb the policy declares: `view`, `create`, `update`,
+  `delete`, or domain-specific ones like `grade`, `take_attendance`, `manage`.
+- **`condition`** — *optional*. A relationship predicate declared on the policy
+  (`is_teacher`, `is_department_head`) that narrows the grant to only the rows
+  where it holds. This is the piece flat permission strings can't express.
+- **`*`** — every ability (optionally within a condition).
+
+### A role is just a set of these strings
+
+Assign them however you like — a roles table, config, JWT claims. Notice how the
+*same* resource is granted at different scopes per role:
+
+```php
+// Administrator — unrestricted
+'course_sections.*',
+'students.*',
+'timesheets.*',
+'settings.manage',                          // capability: a section-level gate, no records
+
+// Teacher — reads everything, but only acts on what they teach
+'course_sections.view',                     // view any section
+'course_sections.is_teacher.update',        // ...but edit only their own
+'course_sections.is_teacher.grade',
+'course_sections.is_teacher.take_attendance',
+'students.is_teacher.view',                 // only students in their sections
+
+// Department Head — a teacher, plus authority over their department
+'course_sections.view',
+'course_sections.is_teacher.*',             // everything on sections they teach
+'course_sections.is_department_head.*',     // ...and every section in their department
+'timesheets.is_department_manager.view',
+'timesheets.is_department_manager.update',  // approve their department's timesheets
+
+// Front Office — manages student records, no teaching scope
+'students.view',
+'students.create',
+'students.update',
+```
+
+`course_sections` alone is granted three ways here — globally (`view`),
+relationship-scoped (`is_teacher.update`), and department-scoped wildcard
+(`is_department_head.*`). Adding a rule is adding a string; the policy already
+knows how to enforce it everywhere.
+
 ## Why Warden? (vs. Spatie laravel-permission, Bouncer, and friends)
 
-Most Laravel "permission" packages solve exactly one part of the problem:
-**storing and assigning permission strings, and answering a global yes/no.**
-They give you `roles`/`permissions` tables, `$user->givePermissionTo('edit
-articles')`, and `$user->can('edit articles')`. That's genuinely useful, and if
-your rules are flat and global — "admins can edit articles" — you don't need
-Warden.
+Most permission packages store and assign permission strings and answer a global
+yes/no. That's the easy 10%. Watch what happens with the Teacher above — *"a
+teacher may edit only the sections they teach"* — the moment you need it.
 
-But "does this user have permission X?" is the easy 10% of a real authorization
-system. The hard 90% is everything those packages hand straight back to you:
+**Without Warden** — the "only their own" rule has nowhere to live but your
+controllers, restated every time:
 
-- **"Which records can they act on?"** `$user->can('update articles')` is a
-  single boolean — it can't tell you *which* articles. The moment a rule is
-  record-scoped ("a teacher may edit the sections they teach", "a manager may
-  approve timesheets in their department"), you're back to hand-writing `where`
-  clauses in every controller and keeping them in sync with a *separate* set of
-  policy checks. Two encodings of the same rule, guaranteed to drift.
-- **Listing thousands of rows.** With a boolean-only package you either load
-  everything and filter in PHP (slow, and it breaks pagination and counts) or
-  hand-roll the SQL. Warden pushes the rule into the query —
-  `Article::query()->hasAbility('update')->paginate()` — so unauthorized rows
-  never hydrate, counts and pagination stay correct, and it's one round trip.
-- **Relationship-derived permissions.** `timesheets.is_department_manager.update`
-  isn't just a flag: the `is_department_manager` condition is a real SQL
-  predicate you define once, and Warden reuses it everywhere — the boolean
-  check, the query scope, and the per-row abilities sent to the frontend. The
-  storage packages have no concept of a condition; a permission is a global
-  label, so "manager-scoped" lives in your controllers, not your permissions.
-- **One source of truth.** Otherwise the same rule ends up in four places: the
-  permission string in the DB, the Gate/policy logic in PHP, the list-filtering
-  `where` in each controller, and the UI gating on the frontend — four
-  encodings that must agree. A Warden policy defines the abilities, the
-  conditions, and how they compile to SQL once, and drives all four — including
-  `selectAbilities()`, which attaches each row's computed abilities so the
-  frontend can gate buttons without a second copy of the rules.
+```php
+// "Can they update sections?" — a global boolean. It can't say WHICH sections.
+$user->can('course_sections.update');
 
-Warden is **not** a storage library and does not compete with those packages on
-that front — it deliberately doesn't own your tables. You hand it a
-`PermissionResolver` that returns the permission strings a user holds, from
-wherever they live. You can even keep Spatie as your storage/assignment layer
-and point Warden's resolver at it: Spatie stores and assigns, Warden evaluates,
-scopes queries, and exposes per-row abilities. They sit at different layers.
+// So listing the ones they may edit is hand-written SQL (rule copy #1):
+$sections = CourseSection::query()
+    ->whereIn('id', CourseSectionTeacher::where('teacher_id', $user->teacher_id)->select('course_section_id'))
+    ->paginate();
 
-In short: those packages are a well-built database helper for permission
-*strings*. Warden is the part that turns those strings into record-level,
-relationship-aware authorization pushed into the database — the part that is
-actually hard to build and keep correct as an app grows.
+// Authorizing a single section — the same rule again, by hand (rule copy #2):
+abort_unless(
+    $user->can('course_sections.update-any')
+        || $section->teachers()->where('teacher_id', $user->teacher_id)->exists(),
+    403
+);
+
+// Gating the edit button per row on a list — the rule a third time (and an N+1):
+$sections->each(fn ($s) => $s->canEdit = /* ...that same check... */);
+```
+
+**With Warden** — the rule lives once, as the `is_teacher` condition on
+`CourseSectionPolicy`, and every site reuses it:
+
+```php
+// List — only editable rows hydrate; pagination and counts stay correct; one query:
+$sections = CourseSection::query()->hasAbility('update')->paginate();
+
+// Single record — same rule, not restated:
+CourseSectionPolicy::userHasAbilities('update', $section, $user);
+
+// Per-row gating for the frontend — same rule, computed in the query, no N+1:
+CourseSection::query()->selectAbilities()->get();   // each row carries an `abilities` array
+
+// Route — same rule again:
+Route::put('/sections/{course_section}', ...)->middleware(WardenMiddleware::canUpdate('course_section'));
+```
+
+The `hasAbility('update')` scope expands to exactly the grants the user holds:
+an unconditional `course_sections.update` adds nothing (all rows pass), while
+`course_sections.is_teacher.update` injects the `is_teacher` predicate — so a
+Teacher and an Administrator hit the same call site and get correctly different
+result sets, with no `if` ladders.
+
+Warden is **not** a storage library and doesn't compete with those packages
+there — it deliberately doesn't own your tables. You hand it a
+`PermissionResolver` that returns the strings a user holds, from wherever they
+live. You can even keep Spatie as the storage/assignment layer and point
+Warden's resolver at it: Spatie stores, Warden evaluates and scopes.
 
 ## Installation
 
