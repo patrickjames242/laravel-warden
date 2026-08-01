@@ -2,8 +2,6 @@
 
 namespace Warden\RuleSyntaxTree;
 
-use Illuminate\Support\Collection;
-
 readonly class WardenRuleSet
 {
 

@@ -5,8 +5,8 @@ namespace Warden\RuleSyntaxTree;
 readonly class AndNode implements IBooleanExpressionNode
 {
     public function __construct(
-        IBooleanExpressionNode $leftSide,
-        IBooleanExpressionNode $rightSide,
+        public IBooleanExpressionNode $leftSide,
+        public IBooleanExpressionNode $rightSide,
     ){
 
     }
