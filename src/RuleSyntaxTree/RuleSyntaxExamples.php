@@ -7,8 +7,8 @@ class RuleSyntaxExamples
 
     public function examples(){
 
-        $ruleSet = WardenRuleSet::make('timesheets', "
-        
+        $ruleSet = WardenRuleSet::fromSyntax('timesheets', "
+
             if is_self or (!is_manager and is_specific_user('some_user_id'))
             they can edit, view, delete
             they cannot approve, deny 
@@ -25,8 +25,8 @@ class RuleSyntaxExamples
 
         //Validation contract. Placeholder with no binding, binding with no placeholder, positional count ≠ ? count — all undefined. These should be hard errors at make() time, not silent.
 
-        $ruleSet = WardenRuleSet::make('timesheets', "
-        
+        $ruleSet = WardenRuleSet::fromSyntax('timesheets', "
+
             if (!(is_self or (
                 !is_manager 
                 and is_specific_user(
@@ -51,9 +51,9 @@ class RuleSyntaxExamples
 
         // positional bindings count left to right accross the entire string
 
-        $ruleSet = WardenRuleSet::make('timesheets', "
-        
-            if is_department(?, ?, ?) 
+        $ruleSet = WardenRuleSet::fromSyntax('timesheets', "
+
+            if is_department(?, ?, ?)
             they can view
             
         ", [
@@ -62,25 +62,25 @@ class RuleSyntaxExamples
             'department_id_3',
         ]);
 
-        $individualRule1 = WardenRule::make("
+        $individualRule1 = WardenRule::fromSyntax("
             they cannot publish
         ");
 
-        $individualRule2 = WardenRule::make("
+        $individualRule2 = WardenRule::fromSyntax("
             they cannot edit
         ");
 
-        $individualRule3 = WardenRule::make("
+        $individualRule3 = WardenRule::fromSyntax("
             if some_condition(:some_param)
             they can edit
         ", [
             'some_param' => 'some_value'
         ]);
 
-        // compose rule set of individual already resolved rules. (does not need to accept bindings. does not allow mixing raw rule syntax with already resolved rules.)
-        $ruleSet = WardenRuleSet::make('timesheets', $individualRule1, $individualRule2, $individualRule3);
+        // compose rule set of individual already resolved rules. (does not accept bindings. does not allow mixing raw rule syntax with already resolved rules.)
+        $ruleSet = WardenRuleSet::fromRules('timesheets', $individualRule1, $individualRule2, $individualRule3);
 
-        $ruleSet = WardenRuleSet::make('timesheets', [$individualRule1, $individualRule2, $individualRule3]);
+        $ruleSet = WardenRuleSet::fromRules('timesheets', [$individualRule1, $individualRule2, $individualRule3]);
 
 
 

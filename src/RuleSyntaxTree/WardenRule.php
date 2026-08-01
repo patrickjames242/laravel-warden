@@ -13,8 +13,16 @@ readonly class WardenRule
 
     }
 
-    public static function make(string $ruleString, array $bindings = []): WardenRule{
-
+    /**
+     * Build a single rule by parsing raw Warden syntax, resolving any
+     * named (:name) or positional (?) placeholders against $bindings.
+     */
+    public static function fromSyntax(
+        string $syntax,
+        array $bindings = [],
+    ): self {
+        // TODO: parse a single rule from $syntax (resolving $bindings) and construct.
+//        throw new \RuntimeException('Not implemented.');
     }
 
 }
