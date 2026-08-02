@@ -1,128 +1,206 @@
-# Warden
+# Laravel Warden
 
-Schema-based authorization and permissions for Laravel, with authorization
-pushed down into the database query.
+Schema-based authorization for Laravel that compiles a small, human-readable
+permission language **directly into SQL** — so "what can this user do?" and
+"which rows can this user touch?" are answered by the database in a single query,
+not by loading records and looping in PHP.
 
-Warden turns dot-notation permission strings — `timesheets.update`,
-`timesheets.is_department_manager.update`, `timesheets.*` — into consistent
-authorization across route middleware, targeted checks, and **query scoping**,
-so unauthorized rows never hydrate. Where permissions are *stored* is entirely
-up to you: Warden asks a `PermissionResolver` you provide.
-
-## The permission string
-
-Every grant in Warden is a dot-notation string with two to three segments:
-
-```
-base.ability                 timesheets.view
-base.*                       timesheets.*                          (every ability on the resource)
-base.condition.ability       timesheets.is_department_manager.update
-base.condition.*             course_sections.is_department_head.*
+```text
+if is_self or (is_manager and same_department)
+they can view, update
+they cannot delete
 ```
 
-- **`base`** — the resource, i.e. a schema's base name (`course_sections`,
-  `students`, `timesheets`), or a capability with no records (`settings`).
-- **`ability`** — the verb the schema declares: `view`, `create`, `update`,
-  `delete`, or domain-specific ones like `grade`, `take_attendance`, `manage`.
-- **`condition`** — *optional*. A relationship predicate declared on the schema
-  (`is_teacher`, `is_department_head`) that narrows the grant to only the rows
-  where it holds. This is the piece flat permission strings can't express.
-- **`*`** — every ability (optionally within a condition).
+That block is a real, complete permission rule. Warden turns it into a `WHERE`
+clause. This README explains the problem Warden solves, the language above in
+full detail, and exactly how you hand rules to the library.
 
-### A role is just a set of these strings
+---
 
-Assign them however you like — a roles table, config, JWT claims. Notice how the
-*same* resource is granted at different scopes per role:
+## Table of contents
+
+- [The problem](#the-problem)
+- [How Warden thinks about authorization](#how-warden-thinks-about-authorization)
+- [Installation](#installation)
+- [A complete example](#a-complete-example)
+- [Schemas: the vocabulary of a resource](#schemas-the-vocabulary-of-a-resource)
+  - [Abilities](#abilities)
+  - [Conditions](#conditions)
+  - [Targeted vs. no-target conditions](#targeted-vs-no-target-conditions)
+  - [Conditions with parameters](#conditions-with-parameters)
+- [The rule language](#the-rule-language)
+  - [Anatomy of a rule](#anatomy-of-a-rule)
+  - [`can` and `cannot`](#can-and-cannot)
+  - [Conditions and boolean logic](#conditions-and-boolean-logic)
+  - [Operator precedence](#operator-precedence)
+  - [Wildcards](#wildcards)
+  - [Passing arguments to conditions](#passing-arguments-to-conditions)
+  - [Whitespace, multiple rules, and reserved words](#whitespace-multiple-rules-and-reserved-words)
+  - [Formal grammar](#formal-grammar)
+  - [Syntax errors](#syntax-errors)
+- [Providing rules to Warden](#providing-rules-to-warden)
+  - [The `PermissionResolver`](#the-permissionresolver)
+  - [Building a rule set](#building-a-rule-set)
+  - [Implicit rules](#implicit-rules)
+  - [Registering the resolver](#registering-the-resolver)
+- [Checking access](#checking-access)
+  - [On the model](#on-the-model)
+  - [Filtering queries](#filtering-queries)
+  - [Per-row abilities](#per-row-abilities)
+  - [Capability (no-target) checks](#capability-no-target-checks)
+  - [Match modes](#match-modes)
+  - [Route middleware](#route-middleware)
+- [How it compiles to SQL](#how-it-compiles-to-sql)
+- [Testing](#testing)
+- [API cheat sheet](#api-cheat-sheet)
+
+---
+
+## The problem
+
+Say the rule is: *a user can update a timesheet if it's their own, or if they
+manage the department it belongs to — but never once it's locked (unless they're
+an admin).*
+
+With a **Laravel Policy** you write that once, for a single object:
 
 ```php
-// Administrator — unrestricted
-'course_sections.*',
-'students.*',
-'timesheets.*',
-'settings.manage',                          // capability: a section-level gate, no records
+class TimesheetPolicy
+{
+    public function update(User $user, Timesheet $timesheet): bool
+    {
+        if ($user->is_admin) {
+            return true;
+        }
 
-// Teacher — reads everything, but only acts on what they teach
-'course_sections.view',                     // view any section
-'course_sections.is_teacher.update',        // ...but edit only their own
-'course_sections.is_teacher.grade',
-'course_sections.is_teacher.take_attendance',
-'students.is_teacher.view',                 // only students in their sections
+        if ($timesheet->locked) {
+            return false;
+        }
 
-// Department Head — a teacher, plus authority over their department
-'course_sections.view',
-'course_sections.is_teacher.*',             // everything on sections they teach
-'course_sections.is_department_head.*',     // ...and every section in their department
-'timesheets.is_department_manager.view',
-'timesheets.is_department_manager.update',  // approve their department's timesheets
-
-// Front Office — manages student records, no teaching scope
-'students.view',
-'students.create',
-'students.update',
+        return $timesheet->user_id === $user->id
+            || $user->managedDepartmentIds()->contains($timesheet->department_id);
+    }
+}
 ```
 
-`course_sections` alone is granted three ways here — globally (`view`),
-relationship-scoped (`is_teacher.update`), and department-scoped wildcard
-(`is_department_head.*`). Adding a rule is adding a string; the schema already
-knows how to enforce it everywhere.
+That works for `$user->can('update', $timesheet)`. Now watch what happens with the
+two questions every real screen actually asks.
 
-## Why Warden? (vs. Spatie laravel-permission, Bouncer, and friends)
-
-Most permission packages store and assign permission strings and answer a global
-yes/no. That's the easy 10%. Watch what happens with the Teacher above — *"a
-teacher may edit only the sections they teach"* — the moment you need it.
-
-**Without Warden** — the "only their own" rule has nowhere to live but your
-controllers, restated every time:
+**"Which timesheets can this user update?"** The policy can't answer it — it needs
+an object. So you either fetch everything and filter in PHP:
 
 ```php
-// "Can they update sections?" — a global boolean. It can't say WHICH sections.
-$user->can('course_sections.update');
+// Loads the whole table into memory. Pagination is now impossible.
+$editable = Timesheet::all()->filter(fn ($t) => $user->can('update', $t));
+```
 
-// So listing the ones they may edit is hand-written SQL (rule copy #1):
-$sections = CourseSection::query()
-    ->whereIn('id', CourseSectionTeacher::where('teacher_id', $user->teacher_id)->select('course_section_id'))
+…or you re-implement the policy a second time as a query scope:
+
+```php
+Timesheet::query()
+    ->when(! $user->is_admin, function ($q) use ($user) {
+        $q->where('locked', false)
+          ->where(fn ($q) => $q
+              ->where('user_id', $user->id)
+              ->orWhereIn('department_id', $user->managedDepartmentIds()));
+    })
     ->paginate();
-
-// Authorizing a single section — the same rule again, by hand (rule copy #2):
-abort_unless(
-    $user->can('course_sections.update-any')
-        || $section->teachers()->where('teacher_id', $user->teacher_id)->exists(),
-    403
-);
-
-// Gating the edit button per row on a list — the rule a third time (and an N+1):
-$sections->each(fn ($s) => $s->canEdit = /* ...that same check... */);
 ```
 
-**With Warden** — the rule lives once, as the `is_teacher` condition on
-`CourseSectionSchema`, and every site reuses it:
+Now the *same* rule lives in two places, in two different shapes, and they will
+drift the first time someone edits one and forgets the other.
+
+**"What can this user do with each row on this page?"** Your table has view /
+update / delete / approve buttons. So, per page:
 
 ```php
-// List — only editable rows hydrate; pagination and counts stay correct; one query:
-$sections = CourseSection::query()->hasAbility('update')->paginate();
-
-// Single record — same rule, not restated:
-CourseSectionSchema::userHasAbilities('update', $section, $user);
-
-// Per-row gating for the frontend — same rule, computed in the query, no N+1:
-CourseSection::query()->selectAbilities()->get();   // each row carries an `abilities` array
-
-// Route — same rule again:
-Route::put('/sections/{course_section}', ...)->middleware(WardenMiddleware::canUpdate('course_section'));
+$rows = $timesheets->map(fn ($t) => [
+    'timesheet' => $t,
+    'can' => [
+        'view'    => $user->can('view', $t),
+        'update'  => $user->can('update', $t),
+        'delete'  => $user->can('delete', $t),
+        'approve' => $user->can('approve', $t),
+    ],
+]);
+// 50 rows × 4 abilities = 200 policy evaluations, each possibly hitting the DB.
 ```
 
-The `hasAbility('update')` scope expands to exactly the grants the user holds:
-an unconditional `course_sections.update` adds nothing (all rows pass), while
-`course_sections.is_teacher.update` injects the `is_teacher` predicate — so a
-Teacher and an Administrator hit the same call site and get correctly different
-result sets, with no `if` ladders.
+A **flat permission package** (e.g. spatie/laravel-permission) doesn't help here —
+its permissions are global strings:
 
-Warden is **not** a storage library and doesn't compete with those packages
-there — it deliberately doesn't own your tables. You hand it a
-`PermissionResolver` that returns the strings a user holds, from wherever they
-live. You can even keep Spatie as the storage/assignment layer and point
-Warden's resolver at it: Spatie stores, Warden evaluates and scopes.
+```php
+$user->givePermissionTo('update timesheets');
+$user->can('update timesheets'); // true or false, for ALL timesheets
+```
+
+There's no room in `'update timesheets'` for *"their own"*, *"in a department they
+manage"*, or *"unless locked."* The moment a permission is conditional on the
+record, you're back to writing a Policy — and back to both problems above.
+
+And in every one of these, **the rule is code**. Want managers to approve
+timesheets in their department? That's a deploy. You can't store it per role or
+per tenant, can't let an admin screen define it, can't audit it as data.
+
+### The same thing in Warden
+
+Write the rule once, as data:
+
+```text
+if is_self or manages_department they can update
+if is_locked and not is_admin they cannot update
+if is_admin they can *
+```
+
+(Note how the "unless they're an admin" exception is just `and not is_admin` on
+the deny — the whole rule is right there, readable, in three lines.)
+
+Warden compiles it to SQL, so one rule set answers all three questions —
+consistently, because there's only one source of truth:
+
+```php
+// "Which can they update?"  -> a WHERE clause, paginates fine
+Timesheet::query()->hasAbility('update')->paginate();
+
+// "What can they do to each row?"  -> one computed column, one query
+Timesheet::query()->selectAbilities()->get();   // each row ->abilities = ['view','update']
+
+// "Can they update this one?"  -> a scoped EXISTS
+Timesheet::userHasAbilities('update', $timesheet);
+```
+
+The rest of this README is how that works.
+
+---
+
+## How Warden thinks about authorization
+
+Warden splits authorization into three separate things. Keeping them separate is
+the whole idea:
+
+| Piece | What it is | Who writes it |
+|---|---|---|
+| **Schema** | The *vocabulary* for one resource: the abilities that exist (`view`, `approve`, …) and the conditions a rule may test (`is_self`, `is_manager`, …). Conditions know how to emit SQL. | You, in a PHP class |
+| **Rules** | The *policy itself*, written in Warden's rule language as a plain string (e.g. `if is_self they can view`). Rules reference the schema's vocabulary. | Stored as data — a DB table, config, JWT claims, wherever |
+| **Resolver** | The glue that, at request time, produces the rules that apply to *this* user for *this* resource. | You, one small class |
+
+A **schema is not a policy.** It doesn't decide anything — it only declares what
+words the language may use. The actual decisions live in the rules, which your
+**resolver** supplies. Warden compiles those rules, validated against the schema,
+into SQL.
+
+```text
+       your data (roles, grants)                    request-time
+                │                                         │
+                ▼                                         ▼
+        PermissionResolver ──▶ WardenRuleSet ──▶ RuleSetCompiler ──▶ SQL WHERE / column
+                                     ▲                    │
+                                     │                    │ validated against
+                              WardenSchema ───────────────┘
+                          (abilities + conditions)
+```
+
+---
 
 ## Installation
 
@@ -130,119 +208,580 @@ Warden's resolver at it: Spatie stores, Warden evaluates and scopes.
 composer require patrickhanna/laravel-warden
 ```
 
-Publish the config:
+The service provider auto-registers. Publish the config if you want to edit it in
+place:
 
 ```bash
 php artisan vendor:publish --tag=warden-config
 ```
 
-## Concepts
+Requirements: PHP 8.2+, Laravel 11 or 12. Supported drivers for the SQL Warden
+generates: PostgreSQL, MySQL/MariaDB, and SQLite.
 
-- **Schema** — one `WardenSchema` subclass per resource. It declares the
-  resource's abilities and its conditions, and is the single source of truth for
-  how permissions map to SQL.
-- **Ability** — a verb on a resource (`view`, `update`, …), declared as an
-  `#[Ability]` constant.
-- **Condition** — a named predicate (`is_department_manager`) that narrows a
-  permission to a subset of rows, declared with `#[ConditionWithTarget]` (a SQL
-  predicate) or `#[ConditionWithoutTarget]` (a per-request boolean/SQL).
-- **PermissionResolver** — *you* implement this: given a user + base name, return
-  the permission strings (or `WardenPermission`s) they hold. Warden ships no
-  default resolver.
+---
 
-## Configuration
+## A complete example
 
-`config/warden.php`:
+The four pieces end-to-end. Read the rest of the README for the detail behind
+each.
+
+**1. The schema** — declares the vocabulary for timesheets:
+
+```php
+namespace App\Warden;
+
+use App\Models\Timesheet;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Database\Query\Builder;
+use Warden\Ability;
+use Warden\ConditionWithoutTarget;
+use Warden\ConditionWithTarget;
+use Warden\Schema\WardenSchema;
+
+class TimesheetSchema extends WardenSchema
+{
+    public const model = Timesheet::class;
+
+    #[Ability] public const VIEW    = 'view';
+    #[Ability] public const UPDATE  = 'update';
+    #[Ability] public const DELETE  = 'delete';
+    #[Ability] public const APPROVE = 'approve';
+
+    // Targeted: narrows WHICH timesheet rows the user matches.
+    #[ConditionWithTarget]
+    public function conditionIsSelf(Authenticatable $user, Builder $where, string $entitySqlId): Builder
+    {
+        return $where->whereRaw('timesheets.user_id = ?', [$user->getAuthIdentifier()]);
+    }
+
+    #[ConditionWithTarget]
+    public function conditionInDepartment(Authenticatable $user, Builder $where, string $entitySqlId, array $parameters): Builder
+    {
+        return $where->whereIn('timesheets.department_id', $parameters);
+    }
+
+    // No-target: a plain yes/no about the user, independent of any row.
+    #[ConditionWithoutTarget]
+    public function conditionIsAdmin(Authenticatable $user): bool
+    {
+        return (bool) $user->is_admin;
+    }
+}
+```
+
+**2. The rules** — as data. Here inline; in practice from your DB:
+
+```text
+if is_self they can view, update, delete
+if in_department(?, ?) they can view, approve
+if is_admin they can *
+```
+
+**3. The resolver** — hands those rules to Warden for the current user:
+
+```php
+namespace App\Warden;
+
+use Warden\PermissionResolutionContext;
+use Warden\PermissionResolver;
+use Warden\RuleSyntaxTree\WardenRuleSet;
+
+class DatabasePermissionResolver implements PermissionResolver
+{
+    public function resolve(PermissionResolutionContext $context): WardenRuleSet
+    {
+        // Look up the raw rule string + any binding values for this user/resource.
+        [$syntax, $bindings] = MyPermissionStore::for(
+            user: $context->user,
+            resource: $context->permissionBaseName, // 'timesheets'
+        );
+
+        return WardenRuleSet::fromSyntax($context->permissionBaseName, $syntax, $bindings);
+    }
+}
+```
+
+**4. Wire it up** (`config/warden.php`) and use it:
+
+```php
+'permission_resolver' => App\Warden\DatabasePermissionResolver::class,
+'schemas' => [App\Warden\TimesheetSchema::class],
+```
+
+```php
+// Which timesheets can the current user update? (one SQL query)
+$editable = Timesheet::query()->hasAbility('update')->get();
+
+// Can this user approve this specific timesheet?
+if (Timesheet::userHasAbilities('approve', $timesheet)) { /* ... */ }
+
+// Render buttons: attach the per-row ability list.
+$rows = Timesheet::query()->selectAbilities()->get();
+$rows->first()->abilities; // e.g. ['view', 'update']
+```
+
+---
+
+## Schemas: the vocabulary of a resource
+
+A schema is an `abstract class WardenSchema` subclass, one per resource. It
+declares two things: the **abilities** that exist, and the **conditions** a rule
+may test. It is registered against a model via the `model` constant.
+
+```php
+class TimesheetSchema extends WardenSchema
+{
+    public const model = Timesheet::class;   // the Eloquent model this governs
+    // public const permissionBaseName = 'timesheets'; // optional override
+}
+```
+
+The **base name** (the resource's identifier in rules and permission lookups) is
+derived from the model's table name by default (`timesheets`). Override it with
+the `permissionBaseName` constant. A schema may also have **no model**
+(`public const model = ''`) — a "capability" schema for things like `settings`
+that only answer no-target checks (see [capability checks](#capability-no-target-checks)).
+
+### Abilities
+
+Abilities are the verbs a rule can grant or deny. Declare each as a class
+constant marked `#[Ability]`. The constant's **value** is the ability name used
+in rules; the constant's *name* is irrelevant to Warden.
+
+```php
+#[Ability] public const VIEW    = 'view';
+#[Ability] public const APPROVE = 'approve';
+```
+
+```php
+TimesheetSchema::getAbilities(); // ['view', 'approve', ...]
+```
+
+A rule that names an ability the schema doesn't declare is rejected at compile
+time (see [validation](#how-it-compiles-to-sql)). Warden ships a
+`Warden\StandardAbilities` helper with common names (`VIEW`, `CREATE`, `UPDATE`,
+`DELETE`, `ARCHIVE`) if you want a shared vocabulary.
+
+### Conditions
+
+Conditions are the predicates a rule may test in its `if`. Each is a public
+method marked with `#[ConditionWithTarget]` or `#[ConditionWithoutTarget]`. The
+condition **name** used in rules is derived from the method name: the leading
+`condition` is stripped and the rest is snake-cased (`conditionIsSelf` →
+`is_self`). You can override it: `#[ConditionWithTarget('is_owner')]`.
+
+A condition's one job is to **emit SQL**. There is no in-memory evaluation path —
+even a single-object check runs as a scoped query. This keeps a condition's
+behavior identical whether you're filtering a list or checking one row.
+
+### Targeted vs. no-target conditions
+
+The distinction is: *does this predicate talk about a specific row?*
+
+- **`#[ConditionWithTarget]`** — the predicate constrains *which rows* match. It
+  receives the qualified primary-key SQL id of the entity (`timesheets.id`) and
+  mutates a query builder to add its `WHERE` fragment. Signature:
+
+  ```php
+  #[ConditionWithTarget]
+  public function conditionIsSelf(
+      Authenticatable $user,
+      Builder $where,          // add your predicate to this
+      string $entitySqlId,     // e.g. "timesheets.id" (the correlated row)
+  ): Builder {
+      return $where->whereRaw('timesheets.user_id = ?', [$user->getAuthIdentifier()]);
+  }
+  ```
+
+  Your predicate may reference any column of the entity's table; it is evaluated
+  correlated to the row under test.
+
+- **`#[ConditionWithoutTarget]`** — the predicate is about the *user or the
+  world*, not a row (e.g. "is this user an admin?", "is this tenant on the pro
+  plan?"). It may either mutate a builder like a targeted condition, or simply
+  **return a `bool`**:
+
+  ```php
+  #[ConditionWithoutTarget]
+  public function conditionIsAdmin(Authenticatable $user): bool
+  {
+      return (bool) $user->is_admin;   // true grants outright, false grants nothing
+  }
+  ```
+
+Why the split matters: some checks (**capability checks** and
+`getAbilitiesWithoutEntity`) run with *no row*. In that context a targeted
+condition can't be evaluated, so Warden treats it as **false** (and therefore
+`not <targeted>` as **true**). No-target conditions still evaluate normally.
+
+> **Values are always bound.** Whatever you pass into `whereRaw`, `whereIn`,
+> etc. becomes a bound parameter. Never interpolate a value into the SQL string
+> — conditions run against user- and rule-supplied data.
+
+### Conditions with parameters
+
+A condition can take arguments from the rule (`in_department('sales')`). The
+resolved arguments arrive as one trailing **`array $parameters`** bag — always
+the last argument, after `$entitySqlId` for targeted conditions:
+
+```php
+#[ConditionWithTarget]
+public function conditionInDepartment(
+    Authenticatable $user,
+    Builder $where,
+    string $entitySqlId,
+    array $parameters,          // the rule's arguments, in order
+): Builder {
+    // in_department('sales', 'eng')  ->  $parameters === ['sales', 'eng']
+    return $where->whereIn('timesheets.department_id', $parameters);
+}
+```
+
+A no-target condition that takes parameters omits `$entitySqlId`:
+`conditionX(Authenticatable $user, Builder $where, array $parameters)`. A
+condition that ignores arguments simply doesn't declare the trailing bag — PHP
+drops the extra.
+
+---
+
+## The rule language
+
+This is the heart of Warden. Rules are written as a plain string. You'll
+typically store these strings (per role, per user, per tenant) and load them in
+your resolver.
+
+### Anatomy of a rule
+
+A rule is an optional `if <expression>` followed by one or more `they can` /
+`they cannot` clauses:
+
+```text
+if is_self
+they can view, update
+they cannot delete
+```
+
+- **`if <expression>`** — optional. When present, the clauses only apply where
+  the expression holds. When omitted, the rule is **unconditional** (always
+  applies).
+- **`they can <abilities>`** — grants the listed abilities.
+- **`they cannot <abilities>`** — denies the listed abilities.
+
+Abilities are comma-separated. A rule may have any mix of `can` and `cannot`
+clauses.
+
+### `can` and `cannot`
+
+Warden combines grants and denials with **deny-overrides**. For a given ability,
+the compiled predicate is:
+
+```text
+( any `can` rule for it matches )  AND  ( no `cannot` rule for it matches )
+```
+
+Concretely:
+
+- **A `cannot` is an absolute veto.** `they cannot delete` compiles to "and *not*
+  the delete rule's condition." An **unconditional** `they cannot delete` means
+  *no one can ever delete*, full stop — no `can` rule can bring it back.
+- **An ability with no `can` rule is denied.** Silence is not permission.
+- **An unconditional `they can view` grants view to every row.**
+
+```text
+they can view                 # everyone can view
+if is_locked
+they cannot update, delete    # ...but locked rows can never be updated or deleted,
+                              #    even if another rule grants update
+```
+
+Rule *order does not matter* — the deny-overrides combination is commutative.
+
+### Conditions and boolean logic
+
+The `if` expression is a boolean combination of conditions:
+
+```text
+if is_self or is_manager
+if is_self and not is_locked
+if is_manager and (in_department('sales') or in_department('eng'))
+```
+
+- **`and`**, **`or`** — binary operators.
+- **`not`** — negation. `!` is an accepted synonym (`!is_locked` ≡ `not is_locked`).
+  `not` is the canonical spelling.
+- **Parentheses** group sub-expressions.
+
+Each bare name (`is_self`, `is_manager`) is a condition declared on the schema.
+
+### Operator precedence
+
+From tightest to loosest binding: **`not` / `!`  >  `and`  >  `or`**. Parentheses
+override. So:
+
+```text
+if is_self or not is_manager and is_owner
+```
+
+parses as `is_self OR ((NOT is_manager) AND is_owner)`. When in doubt,
+parenthesize. (`&&` and `||` are **not** supported — use `and` / `or`.)
+
+### Wildcards
+
+`*` stands for **every ability the schema declares**, on both sides:
+
+```text
+if is_admin
+they can *              # grant every ability
+
+if is_suspended
+they cannot *           # deny every ability (a blanket lockout that wins)
+```
+
+`they cannot *` combined with deny-overrides is the idiomatic "kill switch."
+
+### Passing arguments to conditions
+
+A condition can take arguments in three ways: **inline literals**, **named
+bindings**, and **positional bindings**.
+
+**Inline literals** are written directly in the rule. Supported literal types:
+`string` (single-quoted), `int`, `float`, `bool`, `null`.
+
+```text
+if in_department('sales', 'eng') they can view
+if seen_recently(30, true) they can view
+```
+
+Strings use single quotes; escape a quote or backslash with `\'` and `\\`.
+Lists and other complex values **cannot** be written inline — pass them via a
+binding.
+
+**Named bindings** (`:name`) are placeholders filled from a bindings array. The
+*name* is what matters: a binding may be reused any number of times, appear
+anywhere in the string (even across rules), and the array order is irrelevant.
+
+```php
+WardenRuleSet::fromSyntax('timesheets', <<<'RULES'
+    if is_specific_user(:uid) they can view
+    if delegated_to(:uid) they can approve
+    RULES,
+    ['uid' => $currentUserId],   // one value, used twice
+);
+```
+
+**Positional bindings** (`?`) are filled left-to-right across the *entire*
+string from a flat array:
+
+```php
+WardenRuleSet::fromSyntax('timesheets',
+    'if in_department(?, ?) they can view',
+    ['sales', 'eng'],            // ? ? -> 'sales', 'eng'
+);
+```
+
+Rules for bindings — all enforced at parse time:
+
+- **A binding value may be any PHP value** — string, int, array, an object,
+  anything. (Only *inline* literals are restricted to scalars.) Your condition
+  receives it verbatim in `$parameters`.
+- **You may not mix** named and positional bindings in one parse.
+- **Every placeholder must have a value**, and **every provided value must be
+  used**. A missing binding, an unused binding, or a positional count mismatch is
+  an error.
+
+### Whitespace, multiple rules, and reserved words
+
+- **Whitespace is insignificant.** Newlines are cosmetic; an entire rule set can
+  be one line. These are identical:
+
+  ```text
+  if is_self they can view if is_manager they can approve
+  ```
+  ```text
+  if is_self
+  they can view
+
+  if is_manager
+  they can approve
+  ```
+
+- **`if` starts a new rule.** Every `if` begins a new rule; `they can/cannot`
+  clauses attach to the most recent `if` above them. Clauses before any `if` form
+  a single leading unconditional rule.
+
+- **Reserved words** — `if`, `they`, `can`, `cannot`, `and`, `or`, `not` — cannot
+  be used as an *exact* condition or ability name. A name may *contain* or *start
+  with* one, though: `canonical`, `cannot_publish`, `is_and_something` are all
+  fine.
+
+- **Identifiers** (condition, ability, and binding names) match
+  `[A-Za-z_][A-Za-z0-9_-]*`: they start with a letter or underscore and may
+  contain letters, digits, underscores, and dashes. No dots.
+
+### Formal grammar
+
+```ebnf
+ruleset   = clause* ( "if" expr clause+ )* ;
+clause    = "they" ( "can" | "cannot" ) ability ( "," ability )* ;
+ability   = IDENTIFIER | "*" ;
+expr      = or ;
+or        = and ( "or" and )* ;
+and       = not ( "and" not )* ;
+not       = ( "not" | "!" ) not | primary ;
+primary   = "(" expr ")" | condition ;
+condition = IDENTIFIER ( "(" ( arg ( "," arg )* )? ")" )? ;
+arg       = STRING | INT | FLOAT | BOOL | NULL | NAMED_BINDING | POSITIONAL ;
+```
+
+### Syntax errors
+
+Malformed syntax throws `Warden\RuleSyntaxTree\WardenSyntaxException` eagerly,
+with the line, column, and a caret pointing at the offending token — debuggable
+even when the whole rule set is one line:
+
+```
+Reserved word 'can' cannot be used as a name; expected an ability name. (line 1, column 21)
+
+    if is_self they can can
+                        ^
+```
+
+Name validation (does this ability/condition actually exist on the schema?)
+happens later, at **compile time**, when a rule set is compiled against a schema
+— also as a hard error.
+
+---
+
+## Providing rules to Warden
+
+Rules are data. Warden never invents them; it asks *your* resolver for them.
+
+### The `PermissionResolver`
+
+Implement one interface. Given a context (the user, the resource's base name, the
+schema class, and the model class), return the `WardenRuleSet` that governs this
+user's access to that resource.
+
+```php
+use Warden\PermissionResolutionContext;
+use Warden\PermissionResolver;
+use Warden\RuleSyntaxTree\WardenRuleSet;
+
+class DatabasePermissionResolver implements PermissionResolver
+{
+    public function resolve(PermissionResolutionContext $context): WardenRuleSet
+    {
+        // $context->user               — the Authenticatable being checked
+        // $context->permissionBaseName — e.g. 'timesheets'
+        // $context->schema             — the schema class string
+        // $context->model              — the model class string, or null
+
+        $grants = DB::table('role_permissions')
+            ->where('role_id', $context->user->role_id)
+            ->where('resource', $context->permissionBaseName)
+            ->pluck('rule');                    // ['if is_self they can view', ...]
+
+        return WardenRuleSet::fromSyntax(
+            $context->permissionBaseName,
+            $grants->implode("\n"),             // rules concatenate freely
+        );
+    }
+}
+```
+
+The resolver is where *your* permission model meets Warden. Store rule strings in
+a table, compose them from role flags, read them from JWT claims — whatever fits.
+Warden only cares that you return a `WardenRuleSet`.
+
+### Building a rule set
+
+Three ways to construct a `WardenRuleSet`:
+
+**From syntax** (parse a string, resolving bindings inline):
+
+```php
+WardenRuleSet::fromSyntax('timesheets', 'if is_self they can view', $bindings = []);
+```
+
+**From already-parsed rules** — build individual `WardenRule`s and compose them.
+`fromRules` takes a variadic list *or* a single array, and accepts no bindings
+(the rules are already resolved):
+
+```php
+use Warden\RuleSyntaxTree\WardenRule;
+
+$own      = WardenRule::fromSyntax('if is_self they can view, update');
+$noDelete = WardenRule::fromSyntax('they cannot delete');
+
+WardenRuleSet::fromRules('timesheets', $own, $noDelete);
+WardenRuleSet::fromRules('timesheets', [$own, $noDelete]); // equivalent
+```
+
+**Directly with the parser**, if you want the parsed rules without a rule set:
+
+```php
+use Warden\RuleSyntaxTree\Parsing\WardenParser;
+
+$rules = WardenParser::parse('if is_self they can view', $bindings = []); // WardenRule[]
+$one   = WardenParser::parseSingleRule('they cannot delete');            // WardenRule
+```
+
+### Implicit rules
+
+A schema can declare rules that are **always in force**, regardless of what the
+resolver returns, by overriding `implicitRules()`. They're merged into every
+resolved rule set before compilation, so they're validated and obey
+deny-overrides exactly like resolver rules. Ideal for baseline guarantees — an
+admin escape hatch, or a universal lockout:
+
+```php
+use Warden\RuleSyntaxTree\WardenRule;
+
+class TimesheetSchema extends WardenSchema
+{
+    protected function implicitRules(): array
+    {
+        return [
+            WardenRule::fromSyntax('if is_admin they can *'),
+            WardenRule::fromSyntax('if is_suspended they cannot *'),
+        ];
+    }
+}
+```
+
+Because deny-overrides is order-independent, an implicit `cannot` beats any
+resolver-supplied `can`.
+
+### Registering the resolver
+
+Warden ships **no** default resolver — you must configure one in
+`config/warden.php`, plus the list of schemas Warden should know about:
 
 ```php
 return [
-    // A class implementing Warden\PermissionResolver. Required — no default.
-    'permission_resolver' => \App\Warden\RolePermissionResolver::class,
+    'permission_resolver' => App\Warden\DatabasePermissionResolver::class,
 
-    // Explicit registry of every schema Warden should know about.
     'schemas' => [
-        \App\Schemas\TimesheetSchema::class,
+        App\Warden\TimesheetSchema::class,
+        App\Warden\ProjectSchema::class,
     ],
 ];
 ```
 
-## Defining a schema
+---
+
+## Checking access
+
+Once the schema, resolver, and rules are in place, you never touch the compiler
+directly. You ask questions through the model, query scopes, the schema's static
+helpers, or middleware.
+
+### On the model
+
+Add the `HasWardenSchema` trait and point it at the schema:
 
 ```php
-use Illuminate\Contracts\Auth\Authenticatable;use Illuminate\Contracts\Database\Query\Builder;use Warden\Ability;use Warden\ConditionWithTarget;use Warden\Schema\WardenSchema;use Warden\StandardAbilities;
-
-class TimesheetSchema extends WardenSchema
-{
-    public const model = \App\Models\Timesheet::class;
-
-    #[Ability] public const VIEW = StandardAbilities::VIEW;
-    #[Ability] public const UPDATE = StandardAbilities::UPDATE;
-
-    #[ConditionWithTarget]
-    public function conditionIsDepartmentManager(
-        Authenticatable $currentUser,
-        Builder $whereClause,
-        string $timesheetSqlId
-    ): Builder {
-        return $whereClause->whereExists(/* correlate to $timesheetSqlId */);
-    }
-}
-```
-
-A `#[ConditionWithoutTarget]` may return a `bool` — when it returns `true`, the
-user has the ability outright.
-
-## Writing a resolver
-
-```php
-use Warden\PermissionResolver;
-use Warden\PermissionResolutionContext;
-use Illuminate\Support\Collection;
-
-class RolePermissionResolver implements PermissionResolver
-{
-    public function resolve(PermissionResolutionContext $context): iterable
-    {
-        // Return permission strings (or WardenPermission instances) for
-        // $context->user scoped to $context->permissionBaseName.
-        return DB::table('role_permissions')
-            ->where('role_id', $context->user?->getAuthIdentifier())
-            ->pluck('permission');
-    }
-}
-```
-
-## Using it
-
-Query scoping (only rows the user may act on ever load):
-
-```php
-Timesheet::query()->hasAbility('update')->get();
-```
-
-Attach per-row abilities for the frontend to gate on:
-
-```php
-Timesheet::query()->selectAbilities()->get(); // each row gains an `abilities` array
-```
-
-Targeted and no-target checks:
-
-```php
-TimesheetSchema::userHasAbilities('update', $timesheet, $user);   // targeted
-TimesheetSchema::userHasAbilities('create', target: null);        // capability
-```
-
-Route middleware (alias `warden`):
-
-```php
-Route::put('/timesheets/{timesheet}', ...)
-    ->middleware(WardenMiddleware::canUpdate('timesheet'));
-```
-
-Add the model trait to enable the query scopes and static helpers:
-
-```php
+use Illuminate\Database\Eloquent\Model;
 use Warden\HasWardenSchema;
 
 class Timesheet extends Model
@@ -251,17 +790,218 @@ class Timesheet extends Model
 
     public function wardenSchema(): string
     {
-        return TimesheetSchema::class;
+        return App\Warden\TimesheetSchema::class;
     }
 }
 ```
 
-## Requirements
+That unlocks:
 
-- PHP 8.2+
-- Laravel 11 or 12
-- Query scoping (`selectAbilities`) supports PostgreSQL, MySQL/MariaDB, and SQLite.
+```php
+// Boolean checks (run as a scoped EXISTS query):
+Timesheet::userHasAbilities('update', $timesheet);           // for a model instance
+Timesheet::userHasAbilities('update', $timesheetId);         // for a key
+Timesheet::userHasAbilities(['view', 'update'], $timesheet); // several at once
+Timesheet::userHasAbilities('create');                       // no-target / capability
+
+// The ability list for one record:
+Timesheet::getUserAbilities($timesheet);                     // ['view', 'update']
+
+// Attach abilities onto a loaded model:
+$timesheet->loadAbilities();                                 // sets $timesheet->abilities
+```
+
+Each accepts an optional `$user` (defaults to `auth()->user()`) and, for
+`userHasAbilities`, an `AbilityMatchMode`.
+
+### Filtering queries
+
+The `hasAbility` scope restricts a query to the rows the user may act on — the
+"which records?" question, answered in SQL:
+
+```php
+// Timesheets the current user can update:
+Timesheet::query()->hasAbility('update')->paginate();
+
+// Rows they can BOTH view and approve (see match modes):
+Timesheet::query()->hasAbility(['view', 'approve'], matchMode: AbilityMatchMode::ALL)->get();
+
+// For a specific user:
+Timesheet::query()->hasAbility('delete', $user)->get();
+```
+
+### Per-row abilities
+
+The `selectAbilities` scope attaches a computed `abilities` column — a JSON array
+of what the user can do to *that* row — so your UI can render controls without
+N extra checks:
+
+```php
+$rows = Timesheet::query()->selectAbilities()->get();
+
+$rows->first()->abilities; // ['view', 'update']
+```
+
+On a list endpoint you often only care about a subset (say, just `update` to show
+an Edit button). Narrowing it is a real cost saving — the attached subquery grows
+one branch per ability:
+
+```php
+Timesheet::query()->selectAbilities(onlyAbilities: ['update'])->get();
+```
+
+### Capability (no-target) checks
+
+Not every permission is about a row. "Can this user *create* timesheets?" or "can
+they access *settings*?" have no target. Pass `null` as the target (or omit it):
+
+```php
+Timesheet::userHasAbilities('create');                 // target defaults to null
+TimesheetSchema::getUserAbilities();                   // all no-target abilities
+```
+
+For section-level capabilities with no model at all, define a schema with
+`public const model = ''` and only `#[ConditionWithoutTarget]` conditions. In a
+no-target check, targeted conditions are treated as false, so only no-target
+logic contributes.
+
+### Match modes
+
+When you check several abilities at once, `AbilityMatchMode` decides how they
+combine:
+
+- **`AbilityMatchMode::ALL`** (default) — the row/user must satisfy *every* listed
+  ability.
+- **`AbilityMatchMode::ANY`** — *any* one is enough.
+
+```php
+use Warden\AbilityMatchMode;
+
+Timesheet::query()->hasAbility(['view', 'approve'], matchMode: AbilityMatchMode::ANY)->get();
+```
+
+### Route middleware
+
+Warden registers a `warden` route middleware. Build the middleware string with
+`WardenMiddleware`:
+
+```php
+use Warden\WardenMiddleware;
+
+// Capability (no-target) — gate a create route by base name:
+Route::post('/timesheets', ...)->middleware(WardenMiddleware::canCreate('timesheets'));
+
+// Targeted — gate by a route-model-bound parameter:
+Route::get('/timesheets/{timesheet}', ...)
+    ->middleware(WardenMiddleware::string('timesheet', 'view'));
+
+// Group helper:
+WardenMiddleware::guard('timesheets', 'view', function () {
+    Route::get('/timesheets', ...);
+});
+```
+
+There are `canView`, `canCreate`, `canUpdate`, `canDelete`, `canArchive`, and
+`canManage` shortcuts. Under the hood the middleware resolves the target to a
+schema (by base name or by the route-bound model's class) and calls
+`userHasAbilities`, aborting `403` on failure.
+
+---
+
+## How it compiles to SQL
+
+You don't need this section to use Warden, but it explains *why* the semantics
+are what they are.
+
+For each requested ability, the compiler assembles one predicate from all the
+rules that mention it (or `*`):
+
+```text
+predicate(ability) =
+    ( OR of each `can` rule's if-expression )
+    AND ( AND of NOT(each `cannot` rule's if-expression) )
+```
+
+with these hard edges:
+
+- An **unconditional `cannot`** → `AND NOT(true)` → `1 = 0`: the ability is
+  impossible.
+- **No `can` rule** for the ability → `1 = 0`: denied by default.
+- An **unconditional `can`** → an always-true `1 = 1` term.
+
+Every condition leaf is wrapped as an **`EXISTS`** subquery, which makes it a
+strict boolean: a condition that touches a `NULL` column yields `false`, not SQL's
+"unknown," and negation via `NOT EXISTS` is exact. This is why `not`/`cannot`
+behave predictably — no three-valued-logic surprises leak into your
+authorization results. Boolean structure (`and`/`or`/`not`) becomes nested
+`WHERE` groups, with negation pushed to the leaves via De Morgan.
+
+Row filtering applies these predicates to your query's `WHERE`; per-row ability
+selection runs them as correlated subqueries producing the JSON column. Because
+everything is one compiler, the "which rows?", "what can they do?", and "can
+they?" questions can never disagree.
+
+Compilation validates every ability and condition name against the schema; an
+unknown name is a hard error, so a typo in a stored rule fails loudly rather than
+silently granting or denying.
+
+---
+
+## Testing
+
+Warden's own suite drives real SQLite and asserts on rows and ability lists
+rather than SQL strings. The same approach works for your schemas: register a
+fake resolver that returns a fixed `WardenRuleSet`, seed a table, and assert what
+comes back.
+
+```php
+app()->instance(PermissionResolver::class, new class implements PermissionResolver {
+    public function resolve(PermissionResolutionContext $context): WardenRuleSet
+    {
+        return WardenRuleSet::fromSyntax($context->permissionBaseName, 'if is_self they can view');
+    }
+});
+
+$visible = Timesheet::query()->hasAbility('view', $user)->pluck('id');
+expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet->id);
+```
+
+---
+
+## API cheat sheet
+
+**Define a schema** — `extends Warden\Schema\WardenSchema`
+- `const model` — managed Eloquent model (or `''` for a capability schema)
+- `const permissionBaseName` — optional base-name override
+- `#[Ability] const X = '...'` — declare an ability
+- `#[ConditionWithTarget]` / `#[ConditionWithoutTarget]` methods — declare conditions
+- `protected function implicitRules(): array` — always-on rules
+
+**Build rules**
+- `WardenRuleSet::fromSyntax(string $entity, string $syntax, array $bindings = [])`
+- `WardenRuleSet::fromRules(string $entity, WardenRule|array ...$rules)`
+- `WardenRule::fromSyntax(string $syntax, array $bindings = [])`
+- `WardenParser::parse(string $source, array $bindings = []): WardenRule[]`
+- `WardenParser::parseSingleRule(string $source, array $bindings = []): WardenRule`
+
+**Provide rules** — implement `Warden\PermissionResolver`
+- `resolve(PermissionResolutionContext $context): WardenRuleSet`
+- context: `->user`, `->permissionBaseName`, `->schema`, `->model`
+- register in `config/warden.php` → `permission_resolver`, `schemas`
+
+**Check access** — `use Warden\HasWardenSchema` on the model
+- `Model::userHasAbilities($abilities, $target = null, $user = null, $matchMode = ALL): bool`
+- `Model::getUserAbilities($target = null, $user = null): array`
+- `->hasAbility($abilities, $user = null, $matchMode = ALL)` — query scope
+- `->selectAbilities($user = null, $key = 'abilities', ?array $onlyAbilities = null)` — query scope
+- `$model->loadAbilities($user = null)` — attach the ability list to an instance
+- `Warden\AbilityMatchMode::ALL | ANY`
+
+**Middleware** — `Warden\WardenMiddleware`
+- `::string($target, $abilities, $matchMode = ALL)`
+- `::guard($target, $abilities, Closure $routes, $matchMode = ALL)`
+- `::canView / canCreate / canUpdate / canDelete / canArchive / canManage($target, ?Closure)`
 
 ## License
 
-MIT
+MIT.
