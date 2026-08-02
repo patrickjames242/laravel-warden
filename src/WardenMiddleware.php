@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Route;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\Response;
 use Warden\Facades\Warden;
+use Warden\Schema\WardenSchema;
 
 class WardenMiddleware
 {

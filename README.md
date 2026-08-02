@@ -169,12 +169,7 @@ return [
 ## Defining a schema
 
 ```php
-use Warden\WardenSchema;
-use Warden\Ability;
-use Warden\ConditionWithTarget;
-use Warden\StandardAbilities;
-use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Contracts\Database\Query\Builder;
+use Illuminate\Contracts\Auth\Authenticatable;use Illuminate\Contracts\Database\Query\Builder;use Warden\Ability;use Warden\ConditionWithTarget;use Warden\Schema\WardenSchema;use Warden\StandardAbilities;
 
 class TimesheetSchema extends WardenSchema
 {

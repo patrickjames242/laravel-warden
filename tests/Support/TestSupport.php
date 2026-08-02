@@ -12,8 +12,8 @@ use Warden\HasWardenSchema;
 use Warden\PermissionResolutionContext;
 use Warden\PermissionResolver;
 use Warden\RuleSyntaxTree\WardenRuleSet;
+use Warden\Schema\WardenSchema;
 use Warden\WardenManager;
-use Warden\WardenSchema;
 
 class WardenTestUser implements Authenticatable
 {

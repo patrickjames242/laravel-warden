@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
+use Warden\Schema\WardenSchema;
 
 trait HasWardenSchema
 {

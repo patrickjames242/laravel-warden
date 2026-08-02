@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 use OutOfBoundsException;
+use Warden\Schema\WardenSchema;
 
 /**
  * Central registry and validation entry point for Warden.

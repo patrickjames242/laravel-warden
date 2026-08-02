@@ -1,0 +1,269 @@
+<?php
+
+namespace Warden\Schema\Concerns;
+
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Database\Query\Builder;
+use RuntimeException;
+use Warden\AbilityMatchMode;
+use Warden\PermissionResolutionContext;
+use Warden\PermissionResolver;
+use Warden\RuleSyntaxTree\RuleSetCompiler;
+use Warden\RuleSyntaxTree\WardenRuleSet;
+
+/**
+ * The SQL runtime: turns the resolved {@see WardenRuleSet} into access-control
+ * predicates and attaches them to entity queries (row filtering and per-row
+ * ability selection). All condition SQL is produced by the {@see RuleSetCompiler}.
+ */
+trait BuildsAccessQueries
+{
+    /**
+     * Restricts the provided entity query to rows the current user can access.
+     *
+     * `AbilityMatchMode::ALL` requires every requested ability to match for a row.
+     * `AbilityMatchMode::ANY` allows a row through if any requested ability matches.
+     */
+    public function filterQuery(
+        Authenticatable $currentUser,
+        Builder $query,
+        string $entitySqlId,
+        string|array $abilities,
+        AbilityMatchMode $matchMode = AbilityMatchMode::ALL
+    ): Builder
+    {
+        $abilities = $this->normalizeAbilities($abilities);
+
+        if ($abilities === []) {
+            return $query;
+        }
+
+        $ruleSet = $this->resolveRuleSet($currentUser);
+
+        return $query->where(function (Builder $outerWhereClause) use (
+            $abilities,
+            $matchMode,
+            $currentUser,
+            $query,
+            $entitySqlId,
+            $ruleSet,
+        ) {
+            foreach ($abilities as $ability) {
+                $abilityConditionQuery = $this->buildAbilityConditionQuery(
+                    currentUser: $currentUser,
+                    query: $query,
+                    entitySqlId: $entitySqlId,
+                    ability: $ability,
+                    ruleSet: $ruleSet,
+                );
+
+                if ($matchMode === AbilityMatchMode::ALL) {
+                    $outerWhereClause->addNestedWhereQuery($abilityConditionQuery);
+                } else {
+                    $outerWhereClause->addNestedWhereQuery($abilityConditionQuery, 'or');
+                }
+
+            }
+        });
+    }
+
+    /**
+     * Adds a computed abilities column to every row in the provided entity query.
+     *
+     * The computed column contains a JSON array of abilities the current user has
+     * for that specific row. The base row selection is preserved by ensuring `*`
+     * is selected when needed.
+     *
+     * @param array<int, string>|null $onlyAbilities When given, compute only these
+     *   per-row abilities instead of the full declared set. Use it when the UI
+     *   gates on a known subset (e.g. just `update` for an Edit button): the
+     *   attached subquery grows one UNION branch per ability, so narrowing it from
+     *   all abilities to one is a large per-row cost reduction on list endpoints.
+     */
+    public function selectAbilitiesInQuery(
+        Authenticatable $currentUser,
+        Builder $query,
+        string $entitySqlId,
+        string $selectedAbilitiesKey = 'abilities',
+        ?array $onlyAbilities = null
+    ): Builder
+    {
+        if ($query->columns === null) {
+            $query->select('*');
+        }
+
+        $abilities = $onlyAbilities === null
+            ? static::getAbilities()
+            : static::normalizeAbilities($onlyAbilities);
+
+        if ($abilities === []) {
+            return $query->selectRaw("'[]' as {$selectedAbilitiesKey}");
+        }
+
+        $abilitySelectQuery = $this->buildAvailableAbilitiesQuery(
+            currentUser: $currentUser,
+            query: $query,
+            abilities: $abilities,
+            entitySqlId: $entitySqlId
+        );
+
+        /* The JSON aggregate function differs per driver; default to an empty
+           array (json_agg/json_arrayagg yield null over an empty set). */
+        $wrappedAbility = $query->getGrammar()->wrap('ability');
+        $driver = $query->getConnection()->getDriverName();
+        $abilitiesJsonAggregate = match ($driver) {
+            'pgsql' => "coalesce(json_agg({$wrappedAbility}), '[]'::json)",
+            'mysql', 'mariadb' => "coalesce(json_arrayagg({$wrappedAbility}), json_array())",
+            'sqlite' => "coalesce(json_group_array({$wrappedAbility}), json_array())",
+            default => throw new RuntimeException(
+                sprintf('Warden ability selection does not support the [%s] database driver.', $driver)
+            ),
+        };
+
+        $aggregateQuery = $query->newQuery()
+            ->fromSub($abilitySelectQuery, 'available_abilities')
+            ->selectRaw($abilitiesJsonAggregate);
+
+        $query->selectSub(
+            $aggregateQuery,
+            $selectedAbilitiesKey
+        );
+
+        return $query;
+    }
+
+    /**
+     * Returns the abilities the current user can perform without an entity target.
+     *
+     * The evaluation uses only conditions that do not require an entity SQL id
+     * (targeted conditions are forced false). When abilities are provided
+     * explicitly, `AbilityMatchMode::ALL` returns an empty array unless every
+     * requested ability matches in that context.
+     *
+     * @return array<int, string>
+     */
+    public function getAbilitiesWithoutEntity(
+        Authenticatable $currentUser,
+        string|array|null $abilities = null,
+        AbilityMatchMode $matchMode = AbilityMatchMode::ANY
+    ): array
+    {
+        $requestedAbilities = $abilities === null
+            ? static::getAbilities()
+            : $this->normalizeAbilities($abilities);
+
+        if ($requestedAbilities === []) {
+            return [];
+        }
+
+        /* A connection to evaluate the ability predicates on (permission lookup
+           itself is the resolver's job, on its own connection). No-target
+           conditions may reference tenant tables, so a capability schema uses
+           the default connection — the current tenant under tenancy. */
+        $connection = static::model !== ''
+            ? (new (static::model))->getConnection()
+            : app('db')->connection();
+        $baseQuery = $connection->query();
+        $allowedAbilityQuery = $this->buildAvailableAbilitiesQuery(
+            currentUser: $currentUser,
+            query: $baseQuery,
+            abilities: $requestedAbilities
+        );
+
+        $allowedAbilities = $baseQuery->newQuery()
+            ->fromSub($allowedAbilityQuery, 'available_abilities')
+            ->pluck('ability')
+            ->all();
+
+        if (
+            $matchMode === AbilityMatchMode::ALL
+            && count($allowedAbilities) !== count($requestedAbilities)
+        ) {
+            return [];
+        }
+
+        return $allowedAbilities;
+    }
+
+    /**
+     * Resolve and validate the rule set that governs this user's access to the
+     * managed entity.
+     */
+    protected function resolveRuleSet(Authenticatable $currentUser): WardenRuleSet
+    {
+        $resolver = app(PermissionResolver::class);
+
+        $ruleSet = $resolver->resolve(new PermissionResolutionContext(
+            permissionBaseName: static::permissionsBaseName(),
+            schema: static::class,
+            user: $currentUser,
+            model: static::model !== '' ? static::model : null,
+        ));
+
+        $this->compiler()->validate($ruleSet);
+
+        return $ruleSet;
+    }
+
+    protected function compiler(): RuleSetCompiler
+    {
+        return new RuleSetCompiler($this);
+    }
+
+    /**
+     * @param array<int, string> $abilities
+     */
+    protected function buildAvailableAbilitiesQuery(
+        Authenticatable $currentUser,
+        Builder $query,
+        array $abilities,
+        ?string $entitySqlId = null
+    ): Builder
+    {
+        $abilitySelectQuery = null;
+        $ruleSet = $this->resolveRuleSet($currentUser);
+
+        foreach ($abilities as $ability) {
+            $singleAbilitySelectQuery = $query->newQuery()
+                ->selectRaw('? as "ability"', [$ability]);
+
+            $abilityConditionQuery = $this->buildAbilityConditionQuery(
+                currentUser: $currentUser,
+                query: $query,
+                entitySqlId: $entitySqlId,
+                ability: $ability,
+                ruleSet: $ruleSet,
+            );
+
+            $singleAbilitySelectQuery->where(
+                fn(Builder $abilityWhereClause) => $abilityWhereClause->addNestedWhereQuery($abilityConditionQuery)
+            );
+
+            if ($abilitySelectQuery === null) {
+                $abilitySelectQuery = $singleAbilitySelectQuery;
+            } else {
+                $abilitySelectQuery->unionAll($singleAbilitySelectQuery);
+            }
+
+        }
+
+        return $abilitySelectQuery;
+    }
+
+    protected function buildAbilityConditionQuery(
+        Authenticatable $currentUser,
+        Builder $query,
+        string $ability,
+        WardenRuleSet $ruleSet,
+        ?string $entitySqlId = null
+    ): Builder
+    {
+        return $this->compiler()->compileAbility(
+            $currentUser,
+            $query,
+            $ability,
+            $ruleSet,
+            $entitySqlId,
+        );
+    }
+}

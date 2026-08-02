@@ -6,6 +6,7 @@ namespace Warden;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
+use Warden\Schema\WardenSchema;
 
 final readonly class PermissionResolutionContext
 {
