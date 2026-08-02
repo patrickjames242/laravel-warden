@@ -6,15 +6,17 @@ use BadMethodCallException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use ReflectionClass;
 use ReflectionClassConstant;
 use ReflectionMethod;
 use RuntimeException;
+use Warden\RuleSyntaxTree\ConditionResolver;
+use Warden\RuleSyntaxTree\RuleSetCompiler;
+use Warden\RuleSyntaxTree\WardenRuleSet;
 
-abstract class WardenPolicy
+abstract class WardenPolicy implements ConditionResolver
 {
     /**
      * Returns the permission namespace prefix for this policy.
@@ -342,11 +344,15 @@ abstract class WardenPolicy
      * // $query now includes the condition-specific predicate for `is_teacher`
      * ```
      */
+    /**
+     * @param array<int, mixed> $parameters The resolved DSL arguments for the condition.
+     */
     public function applyConditionFilter(
         string $conditionKey,
         Authenticatable $currentUser,
         Builder $whereClause,
-        ?string $entitySqlId = null
+        ?string $entitySqlId = null,
+        array $parameters = []
     ): mixed
     {
         $conditionDefinition = static::conditionDefinitionForKey($conditionKey);
@@ -371,7 +377,42 @@ abstract class WardenPolicy
             $arguments[] = $entitySqlId;
         }
 
+        /* Conditions receive their DSL arguments as a trailing bag. Methods that
+           ignore parameters simply don't declare the trailing argument; PHP drops
+           the extra. */
+        $arguments[] = $parameters;
+
         return $this->{$methodName}(...$arguments);
+    }
+
+    // -- ConditionResolver ----------------------------------------------------
+
+    public function declaredAbilities(): array
+    {
+        return static::getAbilities();
+    }
+
+    public function conditionExists(string $name): bool
+    {
+        return static::conditionDefinitionForKey($name) !== null;
+    }
+
+    public function conditionIsTargeted(string $name): bool
+    {
+        $definition = static::conditionDefinitionForKey($name);
+
+        return $definition !== null && $definition['has_target'];
+    }
+
+    public function applyCondition(
+        string $name,
+        Authenticatable $user,
+        \Illuminate\Database\Query\Builder $whereClause,
+        ?string $entitySqlId,
+        array $parameters
+    ): \Illuminate\Database\Query\Builder|bool
+    {
+        return $this->applyConditionFilter($name, $user, $whereClause, $entitySqlId, $parameters);
     }
 
     /**
@@ -413,11 +454,7 @@ abstract class WardenPolicy
             return $query;
         }
 
-        $resolvedPermissions = $this->resolvePermissions($currentUser);
-
-        if ($resolvedPermissions->isEmpty()) {
-            return $query->whereRaw('1 = 0');
-        }
+        $ruleSet = $this->resolveRuleSet($currentUser);
 
         return $query->where(function (Builder $outerWhereClause) use (
             $abilities,
@@ -425,7 +462,7 @@ abstract class WardenPolicy
             $currentUser,
             $query,
             $entitySqlId,
-            $resolvedPermissions,
+            $ruleSet,
         ) {
             foreach ($abilities as $ability) {
                 $abilityConditionQuery = $this->buildAbilityConditionQuery(
@@ -433,7 +470,7 @@ abstract class WardenPolicy
                     query: $query,
                     entitySqlId: $entitySqlId,
                     ability: $ability,
-                    resolvedPermissions: $resolvedPermissions,
+                    ruleSet: $ruleSet,
                 );
 
                 if ($matchMode === AbilityMatchMode::ALL) {
@@ -447,28 +484,28 @@ abstract class WardenPolicy
     }
 
     /**
-     * @return Collection<int, WardenPermission>
+     * Resolve and validate the rule set that governs this user's access to the
+     * managed entity.
      */
-    private function resolvePermissions(Authenticatable $currentUser): Collection
+    protected function resolveRuleSet(Authenticatable $currentUser): WardenRuleSet
     {
         $resolver = app(PermissionResolver::class);
-        $permissionsBaseName = static::permissionsBaseName();
 
-        $resolvedPermissions = $resolver->resolve(new PermissionResolutionContext(
-            permissionBaseName: $permissionsBaseName,
+        $ruleSet = $resolver->resolve(new PermissionResolutionContext(
+            permissionBaseName: static::permissionsBaseName(),
             policy: static::class,
             user: $currentUser,
             model: static::model !== '' ? static::model : null,
         ));
 
-        /* Resolvers may return raw strings; normalize them. The resolver is
-           untrusted, so this policy only ever acts on its own base name. */
-        return collect($resolvedPermissions)
-            ->map(fn (WardenPermission|string $permission): WardenPermission => $permission instanceof WardenPermission
-                ? $permission
-                : WardenPermission::fromString($permission))
-            ->filter(fn (WardenPermission $permission): bool => $permission->baseName === $permissionsBaseName)
-            ->values();
+        $this->compiler()->validate($ruleSet);
+
+        return $ruleSet;
+    }
+
+    protected function compiler(): RuleSetCompiler
+    {
+        return new RuleSetCompiler($this);
     }
 
     /**
@@ -629,7 +666,7 @@ abstract class WardenPolicy
     ): Builder
     {
         $abilitySelectQuery = null;
-        $resolvedPermissions = $this->resolvePermissions($currentUser);
+        $ruleSet = $this->resolveRuleSet($currentUser);
 
         foreach ($abilities as $ability) {
             $singleAbilitySelectQuery = $query->newQuery()
@@ -640,7 +677,7 @@ abstract class WardenPolicy
                 query: $query,
                 entitySqlId: $entitySqlId,
                 ability: $ability,
-                resolvedPermissions: $resolvedPermissions,
+                ruleSet: $ruleSet,
             );
 
             $singleAbilitySelectQuery->where(
@@ -752,7 +789,10 @@ abstract class WardenPolicy
                     ));
                 }
 
-                if (!$hasTarget && $parameterCount >= 3) {
+                /* No-target conditions accept at most (user, whereClause,
+                   parameters). A fourth parameter means the author is expecting an
+                   entity SQL id they will never receive. */
+                if (!$hasTarget && $parameterCount > 3) {
                     throw new InvalidArgumentException(sprintf(
                         'Condition method [%s::%s] must not accept an entity SQL id parameter when marked #[ConditionWithoutTarget].',
                         static::class,
@@ -805,88 +845,20 @@ abstract class WardenPolicy
             ->all();
     }
 
-    /**
-     * @param Collection<int, WardenPermission> $resolvedPermissions
-     */
     protected function buildAbilityConditionQuery(
         Authenticatable $currentUser,
         Builder $query,
         string $ability,
-        Collection $resolvedPermissions,
+        WardenRuleSet $ruleSet,
         ?string $entitySqlId = null
     ): Builder
     {
-        $abilityConditionQuery = $query->newQuery();
-
-        $relevantPermissions = $resolvedPermissions->filter(
-            fn (WardenPermission $permission): bool => $permission->matchesAbility($ability)
+        return $this->compiler()->compileAbility(
+            $currentUser,
+            $query,
+            $ability,
+            $ruleSet,
+            $entitySqlId,
         );
-
-        if ($relevantPermissions->isEmpty()) {
-            return $abilityConditionQuery->whereRaw('1 = 0');
-        }
-
-        $hasUnconditionalGrant = $relevantPermissions->contains(
-            fn (WardenPermission $permission): bool => $permission->isUnconditional()
-        );
-
-        /* An always-true term so this ability matches every row. It must be an
-           explicit predicate, not an empty query: an empty nested query is
-           dropped from an OR chain, which would silently restrict an ANY-mode
-           check to the other abilities' predicates. */
-        if ($hasUnconditionalGrant) {
-            return $abilityConditionQuery->whereRaw('1 = 1');
-        }
-
-        /* Only conditional grants remain. A no-target check can satisfy no-target
-           conditions but never targeted ones; a targeted check can satisfy both.
-           Undeclared conditions from stale permissions are ignored. */
-        $conditionKeys = $entitySqlId === null
-            ? static::noTargetConditionKeys()
-            : static::conditionKeys();
-
-        $applicableConditionKeys = $relevantPermissions
-            ->map(fn (WardenPermission $permission): ?string => $permission->condition)
-            ->filter(fn (?string $conditionKey): bool => in_array($conditionKey, $conditionKeys, true))
-            ->unique()
-            ->values();
-
-        if ($applicableConditionKeys->isEmpty()) {
-            return $abilityConditionQuery->whereRaw('1 = 0');
-        }
-
-        $hasQueryPredicate = false;
-
-        foreach ($applicableConditionKeys as $conditionKey) {
-            $conditionQuery = $query->newQuery();
-            $conditionResult = $this->applyConditionFilter(
-                $conditionKey,
-                $currentUser,
-                $conditionQuery,
-                $entitySqlId
-            );
-
-            /* A no-target condition may return a boolean instead of building a
-               predicate: true grants the ability outright, false grants nothing. */
-            if (is_bool($conditionResult)) {
-                if ($conditionResult === true) {
-                    return $abilityConditionQuery->whereRaw('1 = 1');
-                }
-
-                continue;
-            }
-
-            $abilityConditionQuery->orWhere(
-                fn (Builder $conditionWhereClause) => $conditionWhereClause->addNestedWhereQuery($conditionQuery)
-            );
-            $hasQueryPredicate = true;
-        }
-
-        /* Every applicable condition was a boolean that evaluated false. */
-        if (!$hasQueryPredicate) {
-            return $abilityConditionQuery->whereRaw('1 = 0');
-        }
-
-        return $abilityConditionQuery;
     }
 }

@@ -11,8 +11,8 @@ use Warden\Facades\Warden;
 use Warden\HasWardenPolicy;
 use Warden\PermissionResolutionContext;
 use Warden\PermissionResolver;
+use Warden\RuleSyntaxTree\WardenRuleSet;
 use Warden\WardenManager;
-use Warden\WardenPermission;
 use Warden\WardenPolicy;
 
 class WardenTestUser implements Authenticatable
@@ -146,16 +146,11 @@ class WardenScopedModelPolicy extends WardenTestPolicy
 
 class FakeWardenPermissionResolver implements PermissionResolver
 {
-    /**
-     * @param  array<int, WardenPermission|string>  $permissions
-     */
-    public function __construct(private array $permissions = []) {}
+    public function __construct(private WardenRuleSet $ruleSet) {}
 
-    public function resolve(PermissionResolutionContext $context): iterable
+    public function resolve(PermissionResolutionContext $context): WardenRuleSet
     {
-        /* Returned verbatim: string/object normalization and base-name scoping
-           are the policy's responsibility, and tests rely on that. */
-        return $this->permissions;
+        return $this->ruleSet;
     }
 }
 
@@ -170,11 +165,24 @@ function useWardenPolicies(array $policies): void
 }
 
 /**
- * @param  array<int, WardenPermission|string>  $permissions
+ * Bind the resolver to a rule set built from Warden syntax. The entity name is
+ * irrelevant to the fake (the policy asks for its own rules), so it defaults to
+ * the course_sections fixture base name.
  */
-function bindWardenPermissions(array $permissions): void
+function bindWardenRules(string $syntax, array $bindings = [], string $entityName = 'course_sections'): void
 {
-    app()->instance(PermissionResolver::class, new FakeWardenPermissionResolver($permissions));
+    app()->instance(
+        PermissionResolver::class,
+        new FakeWardenPermissionResolver(WardenRuleSet::fromSyntax($entityName, $syntax, $bindings))
+    );
+}
+
+/**
+ * Bind the resolver to an explicit rule set.
+ */
+function bindWardenRuleSet(WardenRuleSet $ruleSet): void
+{
+    app()->instance(PermissionResolver::class, new FakeWardenPermissionResolver($ruleSet));
 }
 
 function makeWardenTestUser(?string $roleId = 'role-1'): Authenticatable

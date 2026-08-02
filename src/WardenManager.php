@@ -59,69 +59,6 @@ class WardenManager
     }
 
     /**
-     * Validate one or more persisted permission strings against the registered policies.
-     *
-     * Accepted formats: `base.ability`, `base.condition.ability`, `base.*`,
-     * `base.condition.*`. The input is returned unchanged after validation.
-     *
-     * @param  string|array<array-key, string>  $permissionStrings
-     * @return string|array<array-key, string>
-     */
-    public function validatePermissionStrings(string|array $permissionStrings): string|array
-    {
-        $normalizedPermissionStrings = is_array($permissionStrings)
-            ? $permissionStrings
-            : [$permissionStrings];
-
-        foreach ($normalizedPermissionStrings as $permissionString) {
-            $segments = explode('.', $permissionString);
-
-            if (count($segments) < 2 || count($segments) > 3) {
-                throw new InvalidArgumentException(
-                    sprintf('Warden permission string [%s] is invalid.', $permissionString)
-                );
-            }
-
-            [$permissionBaseName, $conditionOrAbility, $abilityOrWildcard] = array_pad($segments, 3, null);
-
-            try {
-                $policyClass = $this->getPolicyForPermissionBaseName($permissionBaseName);
-            } catch (OutOfBoundsException) {
-                throw new InvalidArgumentException(
-                    sprintf('Warden permission string [%s] has an invalid permission base name.', $permissionString)
-                );
-            }
-
-            $validAbilities = $policyClass::getAbilities();
-            $validConditions = $policyClass::conditionKeys();
-
-            if ($abilityOrWildcard === null) {
-                if ($conditionOrAbility !== '*' && !in_array($conditionOrAbility, $validAbilities, true)) {
-                    throw new InvalidArgumentException(
-                        sprintf('Warden permission string [%s] has an invalid ability.', $permissionString)
-                    );
-                }
-
-                continue;
-            }
-
-            if (!in_array($conditionOrAbility, $validConditions, true)) {
-                throw new InvalidArgumentException(
-                    sprintf('Warden permission string [%s] has an invalid condition.', $permissionString)
-                );
-            }
-
-            if ($abilityOrWildcard !== '*' && !in_array($abilityOrWildcard, $validAbilities, true)) {
-                throw new InvalidArgumentException(
-                    sprintf('Warden permission string [%s] has an invalid ability.', $permissionString)
-                );
-            }
-        }
-
-        return $permissionStrings;
-    }
-
-    /**
      * @param  class-string<Model>  $modelClass
      * @return class-string<WardenPolicy>
      */

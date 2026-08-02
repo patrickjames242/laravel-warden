@@ -5,7 +5,7 @@ return [
      * The permission resolver: a class implementing Warden\PermissionResolver.
      *
      * Warden ships no default — you must provide one. It maps the current user
-     * to the permission strings (or WardenPermission instances) they hold, from
+     * to the WardenRuleSet that governs their access to an entity, built from
      * wherever your permissions live: role/permission tables, JWT claims, a
      * remote service, config, etc.
      */

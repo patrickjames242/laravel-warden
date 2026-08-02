@@ -147,6 +147,58 @@ class RuleSyntaxExamples
             DSL);
     }
 
+    /**
+     * The policy side of a parameterised condition.
+     *
+     * A condition's DSL arguments arrive as a single trailing `array $parameters`
+     * bag (the resolved ConditionNode::$parameters). The condition indexes it and
+     * is responsible for binding every value as a placeholder — never
+     * interpolating it into SQL. The bag is always the last argument, after the
+     * entity SQL id for targeted conditions:
+     *
+     *   use Illuminate\Contracts\Auth\Authenticatable;
+     *   use Illuminate\Contracts\Database\Query\Builder;
+     *   use Warden\ConditionWithTarget;
+     *   use Warden\ConditionWithoutTarget;
+     *
+     *   // Targeted: (user, whereClause, entitySqlId, parameters)
+     *   #[ConditionWithTarget]
+     *   public function conditionIsSpecificUser(
+     *       Authenticatable $user,
+     *       Builder $where,
+     *       string $entitySqlId,
+     *       array $parameters,
+     *   ): Builder {
+     *       // is_specific_user('some-user-id') -> $parameters[0] === 'some-user-id'
+     *       return $where->whereRaw("{$entitySqlId} = ?", [$parameters[0]]);
+     *   }
+     *
+     *   // Variadic / list argument -> a whereIn:
+     *   #[ConditionWithTarget]
+     *   public function conditionIsDepartment(
+     *       Authenticatable $user,
+     *       Builder $where,
+     *       string $entitySqlId,
+     *       array $parameters,
+     *   ): Builder {
+     *       // is_department(?, ?, ?) with positional bindings ['a', 'b', 'c']
+     *       return $where->whereIn($entitySqlId, $parameters);
+     *   }
+     *
+     *   // No-target boolean condition: (user, ...) returning true/false.
+     *   #[ConditionWithoutTarget]
+     *   public function conditionIsSuperUser(Authenticatable $user): bool {
+     *       return $user->isSuperUser();
+     *   }
+     *
+     * Conditions that ignore arguments simply omit the trailing bag; PHP drops
+     * the extra argument.
+     */
+    public function conditionParameterContract(): void
+    {
+        // Documentation only — see the docblock above.
+    }
+
     // -------------------------------------------------------------------------
     // 5. Condition parameters — bindings
     // -------------------------------------------------------------------------

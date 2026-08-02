@@ -20,7 +20,7 @@ function registerWardenTestRoute(string $uri, string $middleware): void
 }
 
 it('allows non-target checks by permission base name', function () {
-    bindWardenPermissions(['course_sections.publish']);
+    bindWardenRules('they can publish');
 
     registerWardenTestRoute('/__warden/non-target', 'warden:course_sections,all,publish');
 
@@ -31,7 +31,7 @@ it('allows non-target checks by permission base name', function () {
 });
 
 it('defaults the match mode to all when omitted', function () {
-    bindWardenPermissions(['course_sections.publish']);
+    bindWardenRules('they can publish');
 
     registerWardenTestRoute('/__warden/default-all', 'warden:course_sections,publish');
 
@@ -41,7 +41,7 @@ it('defaults the match mode to all when omitted', function () {
 });
 
 it('allows targeted checks by route parameter name', function () {
-    bindWardenPermissions(['course_sections.is_teacher.view']);
+    bindWardenRules('if is_teacher they can view');
 
     Schema::create('course_sections', fn ($table) => $table->string('id'));
     DB::table('course_sections')->insert([['id' => 'teacher:teacher-role']]);
@@ -55,7 +55,7 @@ it('allows targeted checks by route parameter name', function () {
 });
 
 it('denies requests when the user lacks the abilities', function () {
-    bindWardenPermissions([]);
+    bindWardenRules('');
 
     registerWardenTestRoute('/__warden/forbidden', 'warden:course_sections,all,publish');
 
@@ -99,7 +99,7 @@ it('builds middleware strings for standard ability helpers', function () {
 });
 
 it('guards a route group with the generated middleware string', function () {
-    bindWardenPermissions(['course_sections.publish']);
+    bindWardenRules('they can publish');
 
     Route::middleware(SubstituteBindings::class)->group(function () {
         WardenMiddleware::guard('course_sections', 'publish', function () {
@@ -113,7 +113,7 @@ it('guards a route group with the generated middleware string', function () {
 });
 
 it('guards a route group with a standard ability helper', function () {
-    bindWardenPermissions(['course_sections.is_teacher.view']);
+    bindWardenRules('if is_teacher they can view');
 
     Schema::create('course_sections', fn ($table) => $table->string('id'));
     DB::table('course_sections')->insert([['id' => 'teacher:teacher-role']]);

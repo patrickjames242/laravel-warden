@@ -5,8 +5,6 @@ require_once __DIR__.'/Support/TestSupport.php';
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Warden\AbilityMatchMode;
-use Warden\PermissionResolver;
-use Warden\WardenPermission;
 
 function createCourseSectionsTable(): void
 {
@@ -15,104 +13,94 @@ function createCourseSectionsTable(): void
     });
 }
 
-it('builds condition-only filters from the resolved permissions', function () {
-    bindWardenPermissions([
-        'course_sections.is_advisor.view',
-        'course_sections.is_teacher.view',
+function seedCourseSections(): void
+{
+    createCourseSectionsTable();
+
+    DB::table('course_sections')->insert([
+        ['id' => 'teacher:teacher-role'],
+        ['id' => 'other-section'],
     ]);
+}
 
-    $rawSql = (new WardenTestPolicy)
-        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view')
-        ->toRawSql();
+/**
+ * @return array<int, string>
+ */
+function filteredSectionIds(string|array $abilities, AbilityMatchMode $matchMode = AbilityMatchMode::ALL): array
+{
+    return (new WardenTestPolicy)
+        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', $abilities, $matchMode)
+        ->orderBy('id')
+        ->pluck('id')
+        ->all();
+}
 
-    expect(normalizeWardenSql($rawSql))->toBe(
-        'select * from "course_sections" where(((('."'advisor' = 'teacher-role'".'))or((course_sections.id = '."'teacher:teacher-role'".'))))'
-    );
+// -- filterQuery (behavioral) -------------------------------------------------
+
+it('matches every row for an unconditional grant', function () {
+    seedCourseSections();
+    bindWardenRules('they can view');
+
+    expect(filteredSectionIds('view'))->toBe(['other-section', 'teacher:teacher-role']);
 });
 
-it('matches every row with an always-true term for an unconditional grant', function () {
-    bindWardenPermissions(['course_sections.view']);
+it('matches every row for a wildcard grant', function () {
+    seedCourseSections();
+    bindWardenRules('they can *');
 
-    $rawSql = (new WardenTestPolicy)
-        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view')
-        ->toRawSql();
-
-    expect(normalizeWardenSql($rawSql))->toBe('select * from "course_sections" where((1 = 1))');
+    expect(filteredSectionIds('view'))->toBe(['other-section', 'teacher:teacher-role']);
 });
 
-it('matches every row with an always-true term for a wildcard grant', function () {
-    bindWardenPermissions(['course_sections.*']);
+it('matches only rows satisfying a targeted condition', function () {
+    seedCourseSections();
+    bindWardenRules('if is_teacher they can view');
 
-    $rawSql = (new WardenTestPolicy)
-        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view')
-        ->toRawSql();
-
-    expect(normalizeWardenSql($rawSql))->toBe('select * from "course_sections" where((1 = 1))');
+    expect(filteredSectionIds('view'))->toBe(['teacher:teacher-role']);
 });
 
-it('denies all rows when no resolved permission grants the ability', function () {
-    bindWardenPermissions(['course_sections.is_teacher.update']);
+it('ORs a no-target and a targeted condition', function () {
+    seedCourseSections();
+    bindWardenRules('if is_advisor or is_teacher they can view');
 
-    $rawSql = (new WardenTestPolicy)
-        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view')
-        ->toRawSql();
-
-    expect(normalizeWardenSql($rawSql))->toBe('select * from "course_sections" where((1 = 0))');
+    // is_advisor is false for a teacher role, so only the teacher row matches.
+    expect(filteredSectionIds('view'))->toBe(['teacher:teacher-role']);
 });
 
-it('builds all-match filters that require every ability group', function () {
-    bindWardenPermissions([
-        'course_sections.is_teacher.view',
-        'course_sections.is_teacher.update',
-    ]);
+it('denies all rows when no rule grants the ability', function () {
+    seedCourseSections();
+    bindWardenRules('if is_teacher they can update');
 
-    $rawSql = (new WardenTestPolicy)
-        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', ['view', 'update'], AbilityMatchMode::ALL)
-        ->toRawSql();
-
-    expect(normalizeWardenSql($rawSql))->toBe(
-        'select * from "course_sections" where((((course_sections.id = '."'teacher:teacher-role'".')))and(((course_sections.id = '."'teacher:teacher-role'".'))))'
-    );
+    expect(filteredSectionIds('view'))->toBe([]);
 });
 
-it('keeps the always-true term in an any-mode mix of unconditional and conditional grants', function () {
-    bindWardenPermissions([
-        'course_sections.view',
-        'course_sections.is_teacher.update',
-    ]);
+it('applies deny-overrides against an unconditional grant', function () {
+    seedCourseSections();
+    bindWardenRules('they can view if is_teacher they cannot view');
 
-    $rawSql = (new WardenTestPolicy)
-        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', ['view', 'update'], AbilityMatchMode::ANY)
-        ->toRawSql();
-
-    expect(normalizeWardenSql($rawSql))->toBe(
-        'select * from "course_sections" where((1 = 1)or(((course_sections.id = '."'teacher:teacher-role'".'))))'
-    );
+    expect(filteredSectionIds('view'))->toBe(['other-section']);
 });
 
-it('ignores resolved permissions belonging to another base name', function () {
-    bindWardenPermissions([
-        'other_base.*',
-        'other_base.view',
-    ]);
+it('denies everything under an unconditional cannot', function () {
+    seedCourseSections();
+    bindWardenRules('they can view they cannot view');
 
-    $sql = (new WardenTestPolicy)
-        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view')
-        ->toSql();
-
-    expect($sql)->toBe('select * from "course_sections" where 1 = 0');
+    expect(filteredSectionIds('view'))->toBe([]);
 });
 
-it('accepts resolved permissions supplied as WardenPermission instances', function () {
-    app()->instance(PermissionResolver::class, new FakeWardenPermissionResolver([
-        new WardenPermission('course_sections', null, 'view'),
-    ]));
+it('requires every ability under ALL match mode', function () {
+    seedCourseSections();
+    bindWardenRules('if is_teacher they can view, update');
 
-    $rawSql = (new WardenTestPolicy)
-        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view')
-        ->toRawSql();
+    expect(filteredSectionIds(['view', 'update'], AbilityMatchMode::ALL))->toBe(['teacher:teacher-role']);
+});
 
-    expect(normalizeWardenSql($rawSql))->toBe('select * from "course_sections" where((1 = 1))');
+it('keeps an unconditional grant winning in ANY match mode', function () {
+    seedCourseSections();
+    bindWardenRules('they can view if is_teacher they can update');
+
+    // view is granted unconditionally, so every row passes an ANY check.
+    expect(filteredSectionIds(['view', 'update'], AbilityMatchMode::ANY))
+        ->toBe(['other-section', 'teacher:teacher-role']);
 });
 
 it('leaves the query unchanged when abilities are empty', function () {
@@ -128,6 +116,24 @@ it('throws when an ability is not defined on the policy', function () {
         ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'destroy'))
         ->toThrow(InvalidArgumentException::class, 'Ability [destroy] is not defined on policy');
 });
+
+it('throws when the rule set names an undeclared ability', function () {
+    bindWardenRules('they can teleport', entityName: 'course_sections');
+
+    expect(fn () => (new WardenTestPolicy)
+        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view'))
+        ->toThrow(InvalidArgumentException::class, 'Ability [teleport] is not declared by the policy');
+});
+
+it('throws when the rule set names an undeclared condition', function () {
+    bindWardenRules('if is_wizard they can view');
+
+    expect(fn () => (new WardenTestPolicy)
+        ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view'))
+        ->toThrow(InvalidArgumentException::class, 'Condition [is_wizard] is not declared by the policy');
+});
+
+// -- reflection helpers -------------------------------------------------------
 
 it('returns the full reflected list of abilities', function () {
     expect(WardenTestPolicy::getAbilities())->toBe(['create', 'publish', 'archive', 'view', 'update']);
@@ -147,27 +153,27 @@ it('requires an entity sql id for targeted conditions', function () {
     ))->toThrow(InvalidArgumentException::class, 'requires an entity SQL id');
 });
 
-it('selects abilities in the query', function () {
-    bindWardenPermissions([
-        'course_sections.is_advisor.view',
-        'course_sections.is_teacher.view',
-    ]);
+// -- selectAbilitiesInQuery (behavioral) --------------------------------------
 
-    $rawSql = (new WardenTestPolicy)
+it('computes per-row abilities as a json column', function () {
+    seedCourseSections();
+    bindWardenRules('they can publish if is_teacher they can view');
+
+    $rows = (new WardenTestPolicy)
         ->selectAbilitiesInQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id')
-        ->toRawSql();
+        ->orderBy('id')
+        ->get();
 
-    expect(normalizeWardenSql($rawSql))->toBe(
-        'select *, (select coalesce(json_group_array("ability"), json_array())from(select * from(select '."'create'".' as "ability" where((1 = 0)))union all select * from(select '."'publish'".' as "ability" where((1 = 0)))union all select * from(select '."'archive'".' as "ability" where((1 = 0)))union all select * from(select '."'view'".' as "ability" where(((('."'advisor' = 'teacher-role'".'))or((course_sections.id = '."'teacher:teacher-role'".')))))union all select * from(select '."'update'".' as "ability" where((1 = 0))))as "available_abilities")as "abilities" from "course_sections"'
-    );
+    $abilitiesById = $rows->mapWithKeys(fn ($row) => [$row->id => json_decode($row->abilities, true)])->all();
+
+    expect($abilitiesById['teacher:teacher-role'])->toBe(['publish', 'view']);
+    expect($abilitiesById['other-section'])->toBe(['publish']);
 });
 
+// -- no-target ability lists --------------------------------------------------
+
 it('returns abilities the user can perform without an entity in one query', function () {
-    bindWardenPermissions([
-        'course_sections.is_advisor.create',
-        'course_sections.publish',
-        'course_sections.view',
-    ]);
+    bindWardenRules('they can publish, view if is_advisor they can create');
 
     $policy = new WardenTestPolicy;
     $user = makeWardenTestUser('advisor');
@@ -180,7 +186,7 @@ it('returns abilities the user can perform without an entity in one query', func
 });
 
 it('grants an ability when a no-target boolean condition evaluates true, denies when false', function () {
-    bindWardenPermissions(['course_sections.is_super_user.view']);
+    bindWardenRules('if is_super_user they can view');
 
     $policy = new WardenBooleanConditionPolicy;
 
@@ -188,18 +194,11 @@ it('grants an ability when a no-target boolean condition evaluates true, denies 
     expect($policy->getAbilitiesWithoutEntity(makeWardenTestUser('other-role')))->toBe([]);
 });
 
-it('checks abilities statically for an entity instance, id, or no target', function () {
-    createCourseSectionsTable();
-    bindWardenPermissions([
-        'course_sections.is_teacher.view',
-        'course_sections.is_teacher.update',
-        'course_sections.publish',
-    ]);
+// -- static entry points ------------------------------------------------------
 
-    DB::table('course_sections')->insert([
-        ['id' => 'teacher:teacher-role'],
-        ['id' => 'other-section'],
-    ]);
+it('checks abilities statically for an entity instance, id, or no target', function () {
+    seedCourseSections();
+    bindWardenRules('they can publish if is_teacher they can view, update');
 
     $user = makeWardenTestUser('teacher-role');
     $entity = new WardenTestModel;
@@ -214,15 +213,8 @@ it('checks abilities statically for an entity instance, id, or no target', funct
 });
 
 it('forwards static ability helpers through the model trait', function () {
-    createCourseSectionsTable();
-    bindWardenPermissions([
-        'course_sections.is_teacher.view',
-        'course_sections.publish',
-    ]);
-
-    DB::table('course_sections')->insert([
-        ['id' => 'teacher:teacher-role'],
-    ]);
+    seedCourseSections();
+    bindWardenRules('they can publish if is_teacher they can view');
 
     $user = makeWardenTestUser('teacher-role');
 
