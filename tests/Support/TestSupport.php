@@ -8,12 +8,12 @@ use Warden\Ability;
 use Warden\ConditionWithoutTarget;
 use Warden\ConditionWithTarget;
 use Warden\Facades\Warden;
-use Warden\HasWardenPolicy;
+use Warden\HasWardenSchema;
 use Warden\PermissionResolutionContext;
 use Warden\PermissionResolver;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 use Warden\WardenManager;
-use Warden\WardenPolicy;
+use Warden\WardenSchema;
 
 class WardenTestUser implements Authenticatable
 {
@@ -61,7 +61,7 @@ class WardenTestModel extends Model
     protected $keyType = 'string';
 }
 
-class WardenTestPolicy extends WardenPolicy
+class WardenTestSchema extends WardenSchema
 {
     public const model = WardenTestModel::class;
 
@@ -93,7 +93,7 @@ class WardenTestPolicy extends WardenPolicy
     }
 }
 
-class WardenBooleanConditionPolicy extends WardenPolicy
+class WardenBooleanConditionSchema extends WardenSchema
 {
     public const model = WardenTestModel::class;
 
@@ -109,7 +109,7 @@ class WardenBooleanConditionPolicy extends WardenPolicy
 
 class WardenScopedModel extends Model
 {
-    use HasWardenPolicy;
+    use HasWardenSchema;
 
     protected $table = 'course_sections';
 
@@ -117,15 +117,15 @@ class WardenScopedModel extends Model
 
     protected $keyType = 'string';
 
-    public function wardenPolicy(): string
+    public function wardenSchema(): string
     {
-        return WardenScopedModelPolicy::class;
+        return WardenScopedModelSchema::class;
     }
 }
 
 class WardenMismatchedScopedModel extends Model
 {
-    use HasWardenPolicy;
+    use HasWardenSchema;
 
     protected $table = 'course_sections';
 
@@ -133,13 +133,13 @@ class WardenMismatchedScopedModel extends Model
 
     protected $keyType = 'string';
 
-    public function wardenPolicy(): string
+    public function wardenSchema(): string
     {
-        return WardenTestPolicy::class;
+        return WardenTestSchema::class;
     }
 }
 
-class WardenScopedModelPolicy extends WardenTestPolicy
+class WardenScopedModelSchema extends WardenTestSchema
 {
     public const model = WardenScopedModel::class;
 }
@@ -155,18 +155,18 @@ class FakeWardenPermissionResolver implements PermissionResolver
 }
 
 /**
- * @param  array<int, class-string<WardenPolicy>>  $policies
+ * @param  array<int, class-string<WardenSchema>>  $schemas
  */
-function useWardenPolicies(array $policies): void
+function useWardenSchemas(array $schemas): void
 {
-    config()->set('warden.policies', $policies);
+    config()->set('warden.schemas', $schemas);
     app()->forgetInstance(WardenManager::class);
     Warden::clearResolvedInstances();
 }
 
 /**
  * Bind the resolver to a rule set built from Warden syntax. The entity name is
- * irrelevant to the fake (the policy asks for its own rules), so it defaults to
+ * irrelevant to the fake (the schema asks for its own rules), so it defaults to
  * the course_sections fixture base name.
  */
 function bindWardenRules(string $syntax, array $bindings = [], string $entityName = 'course_sections'): void

@@ -25,7 +25,7 @@ final class CompilerTestUser implements Authenticatable
 }
 
 /**
- * Fake policy seam:
+ * Fake schema seam:
  *  - abilities: view, edit, delete, publish
  *  - is_teacher   (targeted)        : id = "teacher:{role}"
  *  - is_owner(id) (targeted, param) : id = param[0]

@@ -35,7 +35,7 @@ final class RuleSetCompiler
 
     /**
      * Validate every condition and ability name in the rule set against the
-     * policy. Runs before compilation so unknown names fail loudly.
+     * schema. Runs before compilation so unknown names fail loudly.
      */
     public function validate(WardenRuleSet $ruleSet): void
     {
@@ -45,7 +45,7 @@ final class RuleSetCompiler
             foreach ([...$rule->canAbilities, ...$rule->cannotAbilities] as $ability) {
                 if ($ability !== '*' && ! in_array($ability, $declaredAbilities, true)) {
                     throw new InvalidArgumentException(
-                        sprintf('Ability [%s] is not declared by the policy.', $ability)
+                        sprintf('Ability [%s] is not declared by the schema.', $ability)
                     );
                 }
             }
@@ -137,7 +137,7 @@ final class RuleSetCompiler
     {
         if (! $this->conditions->conditionExists($node->conditionName)) {
             throw new InvalidArgumentException(
-                sprintf('Condition [%s] is not declared by the policy.', $node->conditionName)
+                sprintf('Condition [%s] is not declared by the schema.', $node->conditionName)
             );
         }
     }

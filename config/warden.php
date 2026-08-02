@@ -12,11 +12,11 @@ return [
     'permission_resolver' => null,
 
     /*
-     * The Warden policies registered with the application. Registration is
-     * explicit: every policy that governs a resource must be listed here. A
-     * policy that is not listed is unknown to permission validation and lookups.
+     * The Warden schemas registered with the application. Registration is
+     * explicit: every schema that governs a resource must be listed here. A
+     * schema that is not listed is unknown to permission validation and lookups.
      */
-    'policies' => [
-        // App\Policies\PostPolicy::class,
+    'schemas' => [
+        // App\Schemas\PostSchema::class,
     ],
 ];

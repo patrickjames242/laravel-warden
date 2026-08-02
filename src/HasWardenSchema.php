@@ -7,12 +7,12 @@ use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
 
-trait HasWardenPolicy
+trait HasWardenSchema
 {
     /**
-     * @return class-string<WardenPolicy>
+     * @return class-string<WardenSchema>
      */
-    abstract public function wardenPolicy(): string;
+    abstract public function wardenSchema(): string;
 
     public static function userHasAbilities(
         string|array $abilities,
@@ -23,9 +23,9 @@ trait HasWardenPolicy
     {
         /** @var Model&self $model */
         $model = new static;
-        $policyClass = $model->wardenPolicy();
+        $schemaClass = $model->wardenSchema();
 
-        return $policyClass::userHasAbilities($abilities, $target, $user, $matchMode);
+        return $schemaClass::userHasAbilities($abilities, $target, $user, $matchMode);
     }
 
     /**
@@ -35,9 +35,9 @@ trait HasWardenPolicy
     {
         /** @var Model&self $model */
         $model = new static;
-        $policyClass = $model->wardenPolicy();
+        $schemaClass = $model->wardenSchema();
 
-        return $policyClass::getUserAbilities($target, $user);
+        return $schemaClass::getUserAbilities($target, $user);
     }
 
     public function scopeHasAbility(
@@ -48,7 +48,7 @@ trait HasWardenPolicy
     ): EloquentBuilder
     {
         $model = $query->getModel();
-        $policy = $this->newWardenPolicyInstance($model);
+        $schema = $this->newWardenSchemaInstance($model);
 
         $user ??= auth()->user();
 
@@ -56,7 +56,7 @@ trait HasWardenPolicy
             throw new LogicException('scopeHasAbility requires an authenticated user or an explicit user instance.');
         }
 
-        $policy->filterQuery(
+        $schema->filterQuery(
             currentUser: $user,
             query: $query->getQuery(),
             entitySqlId: $model->getQualifiedKeyName(),
@@ -79,7 +79,7 @@ trait HasWardenPolicy
     ): EloquentBuilder
     {
         $model = $query->getModel();
-        $policy = $this->newWardenPolicyInstance($model);
+        $schema = $this->newWardenSchemaInstance($model);
 
         $user ??= auth()->user();
 
@@ -87,7 +87,7 @@ trait HasWardenPolicy
             throw new LogicException('scopeSelectAbilities requires an authenticated user or an explicit user instance.');
         }
 
-        $policy->selectAbilitiesInQuery(
+        $schema->selectAbilitiesInQuery(
             currentUser: $user,
             query: $query->getQuery(),
             entitySqlId: $model->getQualifiedKeyName(),
@@ -103,7 +103,7 @@ trait HasWardenPolicy
      */
     public function loadAbilities(?Authenticatable $user = null, string $selectedAbilitiesKey = 'abilities'): array
     {
-        $policyClass = $this->wardenPolicy();
+        $schemaClass = $this->wardenSchema();
 
         $user ??= auth()->user();
 
@@ -111,29 +111,29 @@ trait HasWardenPolicy
             throw new LogicException('loadAbilities requires an authenticated user or an explicit user instance.');
         }
 
-        $abilities = $policyClass::getUserAbilities($this, $user);
+        $abilities = $schemaClass::getUserAbilities($this, $user);
 
         $this->setAttribute($selectedAbilitiesKey, $abilities);
 
         return $abilities;
     }
 
-    protected function newWardenPolicyInstance(Model $model): WardenPolicy
+    protected function newWardenSchemaInstance(Model $model): WardenSchema
     {
-        $policyClass = $model->wardenPolicy();
+        $schemaClass = $model->wardenSchema();
 
-        if (!is_a($policyClass, WardenPolicy::class, true)) {
+        if (!is_a($schemaClass, WardenSchema::class, true)) {
             throw new LogicException(
-                sprintf('Model [%s] must return a WardenPolicy class string, got [%s].', $model::class, $policyClass)
+                sprintf('Model [%s] must return a WardenSchema class string, got [%s].', $model::class, $schemaClass)
             );
         }
 
-        if ($policyClass::model !== $model::class) {
+        if ($schemaClass::model !== $model::class) {
             throw new LogicException(
-                sprintf('Policy [%s] must manage model [%s], got [%s].', $policyClass, $model::class, $policyClass::model)
+                sprintf('Schema [%s] must manage model [%s], got [%s].', $schemaClass, $model::class, $schemaClass::model)
             );
         }
 
-        return new $policyClass;
+        return new $schemaClass;
     }
 }

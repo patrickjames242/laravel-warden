@@ -48,13 +48,13 @@ class WardenMiddleware
     private static function normalizeTarget(
         string $target
     ): string {
-        if (is_subclass_of($target, WardenPolicy::class)) {
+        if (is_subclass_of($target, WardenSchema::class)) {
             return $target::permissionsBaseName();
         }
 
         if (is_subclass_of($target, Model::class)) {
             try {
-                return Warden::getPolicyForModelClass($target)::permissionsBaseName();
+                return Warden::getSchemaForModelClass($target)::permissionsBaseName();
             } catch (\OutOfBoundsException) {
             }
 
@@ -62,15 +62,15 @@ class WardenMiddleware
             $model = new $target;
 
             if (
-                method_exists($model, 'wardenPolicy')
-                && is_a($model->wardenPolicy(), WardenPolicy::class, true)
+                method_exists($model, 'wardenSchema')
+                && is_a($model->wardenSchema(), WardenSchema::class, true)
             ) {
-                return $model->wardenPolicy()::permissionsBaseName();
+                return $model->wardenSchema()::permissionsBaseName();
             }
 
             throw new InvalidArgumentException(
                 sprintf(
-                    'Unable to resolve access control policy for model [%s].',
+                    'Unable to resolve access control schema for model [%s].',
                     $target
                 )
             );
@@ -114,7 +114,7 @@ class WardenMiddleware
      * `WardenMiddleware::canView('course_section', fn () => Route::get('/sections/{course_section}', ...));`
      * applies the targeted `view` middleware to the grouped route.
      *
-     * `WardenMiddleware::canView(CourseSectionPolicy::class)`
+     * `WardenMiddleware::canView(CourseSectionSchema::class)`
      * returns `warden:course_sections,view`.
      */
     public static function canView(
@@ -138,7 +138,7 @@ class WardenMiddleware
      * `WardenMiddleware::canCreate('course_sections', fn () => Route::post('/sections', ...));`
      * applies the no-target `create` middleware to the grouped route.
      *
-     * `WardenMiddleware::canCreate(CourseSectionPolicy::class)`
+     * `WardenMiddleware::canCreate(CourseSectionSchema::class)`
      * returns `warden:course_sections,create`.
      */
     public static function canCreate(
@@ -162,7 +162,7 @@ class WardenMiddleware
      * `WardenMiddleware::canUpdate('course_section', fn () => Route::put('/sections/{course_section}', ...));`
      * applies the targeted `update` middleware to the grouped route.
      *
-     * `WardenMiddleware::canUpdate(CourseSectionPolicy::class)`
+     * `WardenMiddleware::canUpdate(CourseSectionSchema::class)`
      * returns `warden:course_sections,update`.
      */
     public static function canUpdate(
@@ -186,7 +186,7 @@ class WardenMiddleware
      * `WardenMiddleware::canDelete('course_section', fn () => Route::delete('/sections/{course_section}', ...));`
      * applies the targeted `delete` middleware to the grouped route.
      *
-     * `WardenMiddleware::canDelete(CourseSectionPolicy::class)`
+     * `WardenMiddleware::canDelete(CourseSectionSchema::class)`
      * returns `warden:course_sections,delete`.
      */
     public static function canDelete(
@@ -210,7 +210,7 @@ class WardenMiddleware
      * `WardenMiddleware::canArchive('course_section', fn () => Route::post('/sections/{course_section}/archive', ...));`
      * applies the targeted `archive` middleware to the grouped route.
      *
-     * `WardenMiddleware::canArchive(CourseSectionPolicy::class)`
+     * `WardenMiddleware::canArchive(CourseSectionSchema::class)`
      * returns `warden:course_sections,archive`.
      */
     public static function canArchive(
@@ -221,7 +221,7 @@ class WardenMiddleware
     }
 
     /**
-     * Guard the `manage` capability of a section (a capability policy such as
+     * Guard the `manage` capability of a section (a capability schema such as
      * `settings`). Unlike the standard abilities, `manage` gates a whole section
      * rather than a model action, so it takes a permission base name, never a
      * route-bound model. Two modes: returns the middleware string, or wraps the
@@ -282,13 +282,13 @@ class WardenMiddleware
         }
 
         try {
-            $policyClass = Warden::getPolicyForPermissionBaseName($target);
+            $schemaClass = Warden::getSchemaForPermissionBaseName($target);
         } catch (\OutOfBoundsException) {
-            $policyClass = null;
+            $schemaClass = null;
         }
         $resolvedTarget = null;
 
-        if ($policyClass === null) {
+        if ($schemaClass === null) {
             $resolvedTarget = $request->route($target);
 
             if (! $resolvedTarget instanceof Model) {
@@ -301,22 +301,22 @@ class WardenMiddleware
             }
 
             try {
-                $policyClass = Warden::getPolicyForModelClass($resolvedTarget::class);
+                $schemaClass = Warden::getSchemaForModelClass($resolvedTarget::class);
             } catch (\OutOfBoundsException) {
-                $policyClass = null;
+                $schemaClass = null;
             }
         }
 
-        if ($policyClass === null) {
+        if ($schemaClass === null) {
             throw new InvalidArgumentException(
                 sprintf(
-                    'Unable to resolve access control policy for [%s].',
+                    'Unable to resolve access control schema for [%s].',
                     $target
                 )
             );
         }
 
-        if (! $policyClass::userHasAbilities($abilities, $resolvedTarget, $user, $abilityMatchMode)) {
+        if (! $schemaClass::userHasAbilities($abilities, $resolvedTarget, $user, $abilityMatchMode)) {
             abort(403);
         }
 

@@ -17,7 +17,7 @@ class SelectAbilitiesScope implements Scope
             return;
         }
 
-        if (! method_exists($model, 'wardenPolicy')) {
+        if (! method_exists($model, 'wardenSchema')) {
             return;
         }
 

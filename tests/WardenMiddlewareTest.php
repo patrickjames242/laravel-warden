@@ -10,7 +10,7 @@ use Warden\AbilityMatchMode;
 use Warden\WardenMiddleware;
 
 beforeEach(function () {
-    useWardenPolicies([WardenScopedModelPolicy::class]);
+    useWardenSchemas([WardenScopedModelSchema::class]);
 });
 
 function registerWardenTestRoute(string $uri, string $middleware): void
@@ -77,7 +77,7 @@ it('rejects targeted checks when the route parameter is not a model instance', f
 it('builds middleware strings with an implicit all match mode', function () {
     expect(WardenMiddleware::string('course_sections', 'publish'))
         ->toBe('warden:course_sections,publish');
-    expect(WardenMiddleware::string(WardenScopedModelPolicy::class, 'publish'))
+    expect(WardenMiddleware::string(WardenScopedModelSchema::class, 'publish'))
         ->toBe('warden:course_sections,publish');
     expect(WardenMiddleware::string(WardenScopedModel::class, 'publish'))
         ->toBe('warden:course_sections,publish');

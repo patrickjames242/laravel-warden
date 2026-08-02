@@ -6,7 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Query\Builder;
 
 /**
- * The seam between a compiled {@see WardenRuleSet} and the host policy. The
+ * The seam between a compiled {@see WardenRuleSet} and the host schema. The
  * compiler only knows how to assemble boolean structure and the deny-overrides
  * formula; everything condition-specific (which conditions exist, whether they
  * are row-targeted, and the SQL they emit) is delegated here.
@@ -14,7 +14,7 @@ use Illuminate\Database\Query\Builder;
 interface ConditionResolver
 {
     /**
-     * Every ability declared by the policy. Used to expand `*` and to validate
+     * Every ability declared by the schema. Used to expand `*` and to validate
      * ability names.
      *
      * @return array<int, string>
@@ -22,7 +22,7 @@ interface ConditionResolver
     public function declaredAbilities(): array;
 
     /**
-     * Whether a condition with this name is declared by the policy.
+     * Whether a condition with this name is declared by the schema.
      */
     public function conditionExists(string $name): bool;
 

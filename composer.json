@@ -1,7 +1,7 @@
 {
     "name": "patrickhanna/laravel-warden",
-    "description": "Policy-based authorization and permissions for Laravel, with database-scoped ability checks.",
-    "keywords": ["laravel", "authorization", "permissions", "policies", "access-control"],
+    "description": "Schema-based authorization and permissions for Laravel, with database-scoped ability checks.",
+    "keywords": ["laravel", "authorization", "permissions", "schemas", "access-control"],
     "license": "MIT",
     "authors": [
         {

@@ -16,10 +16,10 @@ use Warden\RuleSyntaxTree\ConditionResolver;
 use Warden\RuleSyntaxTree\RuleSetCompiler;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 
-abstract class WardenPolicy implements ConditionResolver
+abstract class WardenSchema implements ConditionResolver
 {
     /**
-     * Returns the permission namespace prefix for this policy.
+     * Returns the permission namespace prefix for this schema.
      *
      * The value is derived from the table name of the model referenced by `static::model`.
      * That makes the prefix deterministic and keeps permission strings aligned with the
@@ -27,7 +27,7 @@ abstract class WardenPolicy implements ConditionResolver
      *
      * Example:
      * ```php
-     * CourseSectionPolicy::permissionsBaseName();
+     * CourseSectionSchema::permissionsBaseName();
      * ```
      *
      * Expected output:
@@ -50,7 +50,7 @@ abstract class WardenPolicy implements ConditionResolver
     }
 
     /**
-     * Policies with no model only answer no-target checks. Guard the
+     * Schemas with no model only answer no-target checks. Guard the
      * targeted paths so they fail with a clear message instead of `new ('')`
      * fataling as "Class \"\" not found".
      */
@@ -59,7 +59,7 @@ abstract class WardenPolicy implements ConditionResolver
         if (static::model === '') {
             throw new InvalidArgumentException(
                 sprintf(
-                    'Policy [%s] is a policy with no model and does not support targeted checks; use a no-target check instead.',
+                    'Schema [%s] is a schema with no model and does not support targeted checks; use a no-target check instead.',
                     static::class
                 )
             );
@@ -67,14 +67,14 @@ abstract class WardenPolicy implements ConditionResolver
     }
 
     /**
-     * Returns all targeted condition keys declared by the policy.
+     * Returns all targeted condition keys declared by the schema.
      *
      * A targeted condition key is discovered from each public method marked with
      * `#[ConditionWithTarget(...)]`.
      *
      * Example:
      * ```php
-     * CourseSectionPolicy::targetedConditionKeys();
+     * CourseSectionSchema::targetedConditionKeys();
      * ```
      *
      * Expected output:
@@ -96,14 +96,14 @@ abstract class WardenPolicy implements ConditionResolver
     }
 
     /**
-     * Returns all no-target condition keys declared by the policy.
+     * Returns all no-target condition keys declared by the schema.
      *
      * A no-target condition key is discovered from each public method marked with
      * `#[ConditionWithoutTarget(...)]`.
      *
      * Example:
      * ```php
-     * CourseSectionPolicy::noTargetConditionKeys();
+     * CourseSectionSchema::noTargetConditionKeys();
      * ```
      *
      * Expected output:
@@ -125,13 +125,13 @@ abstract class WardenPolicy implements ConditionResolver
     }
 
     /**
-     * Returns all condition keys declared by the policy.
+     * Returns all condition keys declared by the schema.
      *
      * This combines both targeted and no-target condition keys into one sorted list.
      *
      * Example:
      * ```php
-     * CourseSectionPolicy::conditionKeys();
+     * CourseSectionSchema::conditionKeys();
      * ```
      *
      * Expected output:
@@ -154,14 +154,14 @@ abstract class WardenPolicy implements ConditionResolver
     }
 
     /**
-     * Returns the complete list of abilities declared by the policy.
+     * Returns the complete list of abilities declared by the schema.
      *
      * Abilities are discovered from class constants marked with `#[Ability]`.
      * Constant naming is not used for discovery.
      *
      * Example:
      * ```php
-     * CourseSectionPolicy::getAbilities();
+     * CourseSectionSchema::getAbilities();
      * ```
      *
      * Expected output:
@@ -190,14 +190,14 @@ abstract class WardenPolicy implements ConditionResolver
 
         if (!$user instanceof Authenticatable) {
             throw new InvalidArgumentException(
-                sprintf('Policy [%s] requires an authenticated user or an explicit user instance.', static::class)
+                sprintf('Schema [%s] requires an authenticated user or an explicit user instance.', static::class)
             );
         }
 
-        $policy = new static;
+        $schema = new static;
 
         if ($target === null) {
-            return $policy->getAbilitiesWithoutEntity($user, $abilities, $matchMode) !== [];
+            return $schema->getAbilitiesWithoutEntity($user, $abilities, $matchMode) !== [];
         }
 
         static::assertSupportsTargetedChecks();
@@ -206,7 +206,7 @@ abstract class WardenPolicy implements ConditionResolver
         $model = new (static::model);
         $targetId = $target instanceof Model ? $target->getKey() : $target;
 
-        return $policy->filterQuery(
+        return $schema->filterQuery(
             currentUser: $user,
             query: $model->newQuery()->whereKey($targetId)->getQuery(),
             entitySqlId: $model->getQualifiedKeyName(),
@@ -227,14 +227,14 @@ abstract class WardenPolicy implements ConditionResolver
 
         if (!$user instanceof Authenticatable) {
             throw new InvalidArgumentException(
-                sprintf('Policy [%s] requires an authenticated user or an explicit user instance.', static::class)
+                sprintf('Schema [%s] requires an authenticated user or an explicit user instance.', static::class)
             );
         }
 
-        $policy = new static;
+        $schema = new static;
 
         if ($target === null) {
-            return $policy->getAbilitiesWithoutEntity($user);
+            return $schema->getAbilitiesWithoutEntity($user);
         }
 
         static::assertSupportsTargetedChecks();
@@ -249,7 +249,7 @@ abstract class WardenPolicy implements ConditionResolver
         // whose onceWithColumns mechanism replaces the SELECT clause with
         // ['abilities'], wiping the selectSub and yielding null. Read the
         // hydrated row instead so the alias survives.
-        $row = (array)$policy->selectAbilitiesInQuery(
+        $row = (array)$schema->selectAbilitiesInQuery(
             currentUser: $user,
             query: $model->newQuery()->whereKey($targetId)->getQuery(),
             entitySqlId: $model->getQualifiedKeyName(),
@@ -274,7 +274,7 @@ abstract class WardenPolicy implements ConditionResolver
      *
      * Example:
      * ```php
-     * CourseSectionPolicy::getNoTargetAbilitiesBag($user);
+     * CourseSectionSchema::getNoTargetAbilitiesBag($user);
      * ```
      *
      * Expected output:
@@ -324,14 +324,14 @@ abstract class WardenPolicy implements ConditionResolver
      * Applies a named condition filter to the provided builder.
      *
      * The caller provides the builder that should receive the condition predicate.
-     * The named condition must correspond to a public method declared on the policy
+     * The named condition must correspond to a public method declared on the schema
      * and marked with either `#[ConditionWithTarget(...)]` or
      * `#[ConditionWithoutTarget(...)]`. The builder is mutated in place and also
      * returned for convenience.
      *
      * Example:
      * ```php
-     * $policy->applyConditionFilter(
+     * $schema->applyConditionFilter(
      *     'is_teacher',
      *     $currentUser,
      *     $query,
@@ -359,7 +359,7 @@ abstract class WardenPolicy implements ConditionResolver
 
         if ($conditionDefinition === null) {
             throw new BadMethodCallException(
-                sprintf('Condition [%s] is not defined on policy [%s].', $conditionKey, static::class)
+                sprintf('Condition [%s] is not defined on schema [%s].', $conditionKey, static::class)
             );
         }
 
@@ -367,7 +367,7 @@ abstract class WardenPolicy implements ConditionResolver
 
         if ($conditionDefinition['has_target'] && $entitySqlId === null) {
             throw new InvalidArgumentException(
-                sprintf('Condition [%s] on policy [%s] requires an entity SQL id.', $conditionKey, static::class)
+                sprintf('Condition [%s] on schema [%s] requires an entity SQL id.', $conditionKey, static::class)
             );
         }
 
@@ -418,7 +418,7 @@ abstract class WardenPolicy implements ConditionResolver
     /**
      * Restricts the provided entity query to rows the current user can access.
      *
-     * Each requested ability is validated against the policy's declared ability set.
+     * Each requested ability is validated against the schema's declared ability set.
      * The resulting SQL combines direct permissions (`x.ability`, `x.*`) and
      * condition-scoped permissions (`x.condition.ability`, `x.condition.*`).
      *
@@ -427,7 +427,7 @@ abstract class WardenPolicy implements ConditionResolver
      *
      * Example:
      * ```php
-     * $policy->filterQuery(
+     * $schema->filterQuery(
      *     $currentUser,
      *     DB::table('course_sections'),
      *     'course_sections.id',
@@ -493,7 +493,7 @@ abstract class WardenPolicy implements ConditionResolver
 
         $ruleSet = $resolver->resolve(new PermissionResolutionContext(
             permissionBaseName: static::permissionsBaseName(),
-            policy: static::class,
+            schema: static::class,
             user: $currentUser,
             model: static::model !== '' ? static::model : null,
         ));
@@ -517,7 +517,7 @@ abstract class WardenPolicy implements ConditionResolver
      *
      * Example:
      * ```php
-     * $policy->selectAbilitiesInQuery(
+     * $schema->selectAbilitiesInQuery(
      *     $currentUser,
      *     DB::table('course_sections'),
      *     'course_sections.id',
@@ -601,8 +601,8 @@ abstract class WardenPolicy implements ConditionResolver
      *
      * Example:
      * ```php
-     * $policy->getAbilitiesWithoutEntity($currentUser);
-     * $policy->getAbilitiesWithoutEntity($currentUser, ['create'], AbilityMatchMode::ALL);
+     * $schema->getAbilitiesWithoutEntity($currentUser);
+     * $schema->getAbilitiesWithoutEntity($currentUser, ['create'], AbilityMatchMode::ALL);
      * ```
      *
      * Expected output:
@@ -628,7 +628,7 @@ abstract class WardenPolicy implements ConditionResolver
 
         /* A connection to evaluate the ability predicates on (permission lookup
            itself is the resolver's job, on its own connection). No-target
-           conditions may reference tenant tables, so a capability policy uses
+           conditions may reference tenant tables, so a capability schema uses
            the default connection — the current tenant under tenancy. */
         $connection = static::model !== ''
             ? (new (static::model))->getConnection()
@@ -721,7 +721,7 @@ abstract class WardenPolicy implements ConditionResolver
         foreach ($abilities as $ability) {
             if (!isset($this->abilityLookup[$ability])) {
                 throw new InvalidArgumentException(
-                    sprintf('Ability [%s] is not defined on policy [%s].', $ability, static::class)
+                    sprintf('Ability [%s] is not defined on schema [%s].', $ability, static::class)
                 );
             }
         }

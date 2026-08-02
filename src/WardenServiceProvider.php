@@ -16,7 +16,7 @@ final class WardenServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/warden.php', 'warden');
 
         $this->app->singleton(WardenManager::class, fn (Application $app): WardenManager => new WardenManager(
-            (array) $app['config']->get('warden.policies', [])
+            (array) $app['config']->get('warden.schemas', [])
         ));
 
         /* Warden ships no default resolver; the consumer must configure one. */

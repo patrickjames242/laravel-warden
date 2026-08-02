@@ -10,12 +10,12 @@ use Illuminate\Database\Eloquent\Model;
 final readonly class PermissionResolutionContext
 {
     /**
-     * @param  class-string<WardenPolicy>  $policy
+     * @param  class-string<WardenSchema>  $schema
      * @param  class-string<Model>|null  $model
      */
     public function __construct(
         public string $permissionBaseName,
-        public string $policy,
+        public string $schema,
         public ?Authenticatable $user,
         public ?string $model = null,
     ) {}

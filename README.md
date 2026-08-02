@@ -1,6 +1,6 @@
 # Warden
 
-Policy-based authorization and permissions for Laravel, with authorization
+Schema-based authorization and permissions for Laravel, with authorization
 pushed down into the database query.
 
 Warden turns dot-notation permission strings — `timesheets.update`,
@@ -20,11 +20,11 @@ base.condition.ability       timesheets.is_department_manager.update
 base.condition.*             course_sections.is_department_head.*
 ```
 
-- **`base`** — the resource, i.e. a policy's base name (`course_sections`,
+- **`base`** — the resource, i.e. a schema's base name (`course_sections`,
   `students`, `timesheets`), or a capability with no records (`settings`).
-- **`ability`** — the verb the policy declares: `view`, `create`, `update`,
+- **`ability`** — the verb the schema declares: `view`, `create`, `update`,
   `delete`, or domain-specific ones like `grade`, `take_attendance`, `manage`.
-- **`condition`** — *optional*. A relationship predicate declared on the policy
+- **`condition`** — *optional*. A relationship predicate declared on the schema
   (`is_teacher`, `is_department_head`) that narrows the grant to only the rows
   where it holds. This is the piece flat permission strings can't express.
 - **`*`** — every ability (optionally within a condition).
@@ -63,7 +63,7 @@ Assign them however you like — a roles table, config, JWT claims. Notice how t
 
 `course_sections` alone is granted three ways here — globally (`view`),
 relationship-scoped (`is_teacher.update`), and department-scoped wildcard
-(`is_department_head.*`). Adding a rule is adding a string; the policy already
+(`is_department_head.*`). Adding a rule is adding a string; the schema already
 knows how to enforce it everywhere.
 
 ## Why Warden? (vs. Spatie laravel-permission, Bouncer, and friends)
@@ -96,14 +96,14 @@ $sections->each(fn ($s) => $s->canEdit = /* ...that same check... */);
 ```
 
 **With Warden** — the rule lives once, as the `is_teacher` condition on
-`CourseSectionPolicy`, and every site reuses it:
+`CourseSectionSchema`, and every site reuses it:
 
 ```php
 // List — only editable rows hydrate; pagination and counts stay correct; one query:
 $sections = CourseSection::query()->hasAbility('update')->paginate();
 
 // Single record — same rule, not restated:
-CourseSectionPolicy::userHasAbilities('update', $section, $user);
+CourseSectionSchema::userHasAbilities('update', $section, $user);
 
 // Per-row gating for the frontend — same rule, computed in the query, no N+1:
 CourseSection::query()->selectAbilities()->get();   // each row carries an `abilities` array
@@ -138,7 +138,7 @@ php artisan vendor:publish --tag=warden-config
 
 ## Concepts
 
-- **Policy** — one `WardenPolicy` subclass per resource. It declares the
+- **Schema** — one `WardenSchema` subclass per resource. It declares the
   resource's abilities and its conditions, and is the single source of truth for
   how permissions map to SQL.
 - **Ability** — a verb on a resource (`view`, `update`, …), declared as an
@@ -159,24 +159,24 @@ return [
     // A class implementing Warden\PermissionResolver. Required — no default.
     'permission_resolver' => \App\Warden\RolePermissionResolver::class,
 
-    // Explicit registry of every policy Warden should know about.
-    'policies' => [
-        \App\Policies\TimesheetPolicy::class,
+    // Explicit registry of every schema Warden should know about.
+    'schemas' => [
+        \App\Schemas\TimesheetSchema::class,
     ],
 ];
 ```
 
-## Defining a policy
+## Defining a schema
 
 ```php
-use Warden\WardenPolicy;
+use Warden\WardenSchema;
 use Warden\Ability;
 use Warden\ConditionWithTarget;
 use Warden\StandardAbilities;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Database\Query\Builder;
 
-class TimesheetPolicy extends WardenPolicy
+class TimesheetSchema extends WardenSchema
 {
     public const model = \App\Models\Timesheet::class;
 
@@ -234,8 +234,8 @@ Timesheet::query()->selectAbilities()->get(); // each row gains an `abilities` a
 Targeted and no-target checks:
 
 ```php
-TimesheetPolicy::userHasAbilities('update', $timesheet, $user);   // targeted
-TimesheetPolicy::userHasAbilities('create', target: null);        // capability
+TimesheetSchema::userHasAbilities('update', $timesheet, $user);   // targeted
+TimesheetSchema::userHasAbilities('create', target: null);        // capability
 ```
 
 Route middleware (alias `warden`):
@@ -248,15 +248,15 @@ Route::put('/timesheets/{timesheet}', ...)
 Add the model trait to enable the query scopes and static helpers:
 
 ```php
-use Warden\HasWardenPolicy;
+use Warden\HasWardenSchema;
 
 class Timesheet extends Model
 {
-    use HasWardenPolicy;
+    use HasWardenSchema;
 
-    public function wardenPolicy(): string
+    public function wardenSchema(): string
     {
-        return TimesheetPolicy::class;
+        return TimesheetSchema::class;
     }
 }
 ```

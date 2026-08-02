@@ -148,7 +148,7 @@ class RuleSyntaxExamples
     }
 
     /**
-     * The policy side of a parameterised condition.
+     * The schema side of a parameterised condition.
      *
      * A condition's DSL arguments arrive as a single trailing `array $parameters`
      * bag (the resolved ConditionNode::$parameters). The condition indexes it and
@@ -241,7 +241,7 @@ class RuleSyntaxExamples
     // -------------------------------------------------------------------------
 
     /**
-     * `*` means "every ability" (expanded against the policy's declared abilities
+     * `*` means "every ability" (expanded against the schema's declared abilities
      * at compile time). Works on both `can` and `cannot`.
      */
     public function wildcards(): void

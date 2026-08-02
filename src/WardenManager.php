@@ -11,121 +11,121 @@ use OutOfBoundsException;
  * Central registry and validation entry point for Warden.
  *
  * Responsible for:
- * - mapping model classes to policy classes
- * - mapping permission base names to policy classes
- * - validating persisted permission strings against registered policies
+ * - mapping model classes to schema classes
+ * - mapping permission base names to schema classes
+ * - validating persisted permission strings against registered schemas
  *
  * Bound as a singleton and reached through the Warden facade. The registry is
- * built from the `warden.policies` config.
+ * built from the `warden.schemas` config.
  */
 class WardenManager
 {
     /**
-     * @var array<class-string<Model>, class-string<WardenPolicy>>
+     * @var array<class-string<Model>, class-string<WardenSchema>>
      */
-    private array $modelsToPolicies = [];
+    private array $modelsToSchemas = [];
 
     /**
-     * @var array<string, class-string<WardenPolicy>>
+     * @var array<string, class-string<WardenSchema>>
      */
-    private array $permissionBaseNamesToPolicies = [];
+    private array $permissionBaseNamesToSchemas = [];
 
     /**
-     * @param  array<int, class-string<WardenPolicy>>  $policyClasses
+     * @param  array<int, class-string<WardenSchema>>  $schemaClasses
      */
-    public function __construct(array $policyClasses)
+    public function __construct(array $schemaClasses)
     {
-        foreach ($policyClasses as $policyClass) {
-            $model = $policyClass::model;
+        foreach ($schemaClasses as $schemaClass) {
+            $model = $schemaClass::model;
 
-            $permissionBaseName = $policyClass::permissionsBaseName();
+            $permissionBaseName = $schemaClass::permissionsBaseName();
 
-            if (isset($this->permissionBaseNamesToPolicies[$permissionBaseName])) {
-                throw new InvalidArgumentException('Duplicate policy for permission base name '.$permissionBaseName);
+            if (isset($this->permissionBaseNamesToSchemas[$permissionBaseName])) {
+                throw new InvalidArgumentException('Duplicate schema for permission base name '.$permissionBaseName);
             }
 
-            /* Capability policies have no model; only model-backed policies are
+            /* Capability schemas have no model; only model-backed schemas are
                indexed by model class. */
             if ($model !== '') {
-                if (isset($this->modelsToPolicies[$model])) {
-                    throw new InvalidArgumentException('Duplicate policy for model '.$model);
+                if (isset($this->modelsToSchemas[$model])) {
+                    throw new InvalidArgumentException('Duplicate schema for model '.$model);
                 }
 
-                $this->modelsToPolicies[$model] = $policyClass;
+                $this->modelsToSchemas[$model] = $schemaClass;
             }
 
-            $this->permissionBaseNamesToPolicies[$permissionBaseName] = $policyClass;
+            $this->permissionBaseNamesToSchemas[$permissionBaseName] = $schemaClass;
         }
     }
 
     /**
      * @param  class-string<Model>  $modelClass
-     * @return class-string<WardenPolicy>
+     * @return class-string<WardenSchema>
      */
-    public function getPolicyForModelClass(string $modelClass): string
+    public function getSchemaForModelClass(string $modelClass): string
     {
-        if (!isset($this->modelsToPolicies[$modelClass])) {
-            throw new OutOfBoundsException(sprintf('No Warden policy registered for model [%s].', $modelClass));
+        if (!isset($this->modelsToSchemas[$modelClass])) {
+            throw new OutOfBoundsException(sprintf('No Warden schema registered for model [%s].', $modelClass));
         }
 
-        return $this->modelsToPolicies[$modelClass];
+        return $this->modelsToSchemas[$modelClass];
     }
 
     /**
-     * @return class-string<WardenPolicy>
+     * @return class-string<WardenSchema>
      */
-    public function getPolicyForPermissionBaseName(string $permissionBaseName): string
+    public function getSchemaForPermissionBaseName(string $permissionBaseName): string
     {
-        if (!isset($this->permissionBaseNamesToPolicies[$permissionBaseName])) {
-            throw new OutOfBoundsException(sprintf('No Warden policy registered for permission base name [%s].', $permissionBaseName));
+        if (!isset($this->permissionBaseNamesToSchemas[$permissionBaseName])) {
+            throw new OutOfBoundsException(sprintf('No Warden schema registered for permission base name [%s].', $permissionBaseName));
         }
 
-        return $this->permissionBaseNamesToPolicies[$permissionBaseName];
+        return $this->permissionBaseNamesToSchemas[$permissionBaseName];
     }
 
     /**
-     * Combined no-target ability bag for multiple policies. Each argument may be
-     * a WardenPolicy class string or a permission base name.
+     * Combined no-target ability bag for multiple schemas. Each argument may be
+     * a WardenSchema class string or a permission base name.
      *
      * @return array<string, array{permission_base_name: string, abilities: array<int, string>, target: null}>
      */
     public function getNoTargetAbilitiesBag(
         ?Authenticatable $user = null,
-        string ...$policyClassesOrPermissionBaseNames
+        string ...$schemaClassesOrPermissionBaseNames
     ): array
     {
-        return collect($policyClassesOrPermissionBaseNames)
-            ->map(fn (string $policyClassOrPermissionBaseName): string => $this->resolvePolicyClass(
-                $policyClassOrPermissionBaseName
+        return collect($schemaClassesOrPermissionBaseNames)
+            ->map(fn (string $schemaClassOrPermissionBaseName): string => $this->resolveSchemaClass(
+                $schemaClassOrPermissionBaseName
             ))
             ->reduce(
-                fn (array $combinedBag, string $policyClass): array => [
+                fn (array $combinedBag, string $schemaClass): array => [
                     ...$combinedBag,
-                    $policyClass::permissionsBaseName() => $policyClass::getNoTargetAbilitiesBag($user),
+                    $schemaClass::permissionsBaseName() => $schemaClass::getNoTargetAbilitiesBag($user),
                 ],
                 []
             );
     }
 
     /**
-     * The policy classes registered with Warden.
+     * The schema classes registered with Warden.
      *
-     * @return array<int, class-string<WardenPolicy>>
+     * @return array<int, class-string<WardenSchema>>
      */
-    public function registeredPolicies(): array
+    public function registeredSchemas(): array
     {
-        return array_values($this->permissionBaseNamesToPolicies);
+        return array_values($this->permissionBaseNamesToSchemas);
     }
 
     /**
-     * @return class-string<WardenPolicy>
+     * @return class-string<WardenSchema>
      */
-    private function resolvePolicyClass(string $policyClassOrPermissionBaseName): string
+    private function resolveSchemaClass(string $schemaClassOrPermissionBaseName): string
     {
-        if (is_a($policyClassOrPermissionBaseName, WardenPolicy::class, true)) {
-            return $policyClassOrPermissionBaseName;
+        if (is_a($schemaClassOrPermissionBaseName, WardenSchema::class, true)) {
+            return $schemaClassOrPermissionBaseName;
         }
 
-        return $this->getPolicyForPermissionBaseName($policyClassOrPermissionBaseName);
+        return $this->getSchemaForPermissionBaseName($schemaClassOrPermissionBaseName);
     }
 }
