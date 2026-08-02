@@ -26,7 +26,7 @@ use Warden\RuleSyntaxTree\WardenSyntaxException;
  *   condition:= IDENTIFIER ( '(' (arg (',' arg)*)? ')' )?
  *   arg      := literal | NAMED_BINDING | POSITIONAL
  */
-final class Parser
+final class WardenParser
 {
     /** @var list<Token> */
     private readonly array $tokens;

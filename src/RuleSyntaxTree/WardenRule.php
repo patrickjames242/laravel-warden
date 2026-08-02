@@ -2,7 +2,7 @@
 
 namespace Warden\RuleSyntaxTree;
 
-use Warden\RuleSyntaxTree\Parsing\Parser;
+use Warden\RuleSyntaxTree\Parsing\WardenParser;
 
 readonly class WardenRule
 {
@@ -23,7 +23,7 @@ readonly class WardenRule
         string $syntax,
         array $bindings = [],
     ): self {
-        return Parser::parseSingleRule($syntax, $bindings);
+        return WardenParser::parseSingleRule($syntax, $bindings);
     }
 
 }

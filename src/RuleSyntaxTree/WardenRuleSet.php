@@ -3,7 +3,7 @@
 namespace Warden\RuleSyntaxTree;
 
 use InvalidArgumentException;
-use Warden\RuleSyntaxTree\Parsing\Parser;
+use Warden\RuleSyntaxTree\Parsing\WardenParser;
 
 readonly class WardenRuleSet
 {
@@ -28,7 +28,7 @@ readonly class WardenRuleSet
         string $syntax,
         array $bindings = [],
     ): self {
-        return new self($entityName, Parser::parse($syntax, $bindings));
+        return new self($entityName, WardenParser::parse($syntax, $bindings));
     }
 
     /**

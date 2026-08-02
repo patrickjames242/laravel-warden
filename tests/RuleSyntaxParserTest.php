@@ -8,12 +8,12 @@ use Warden\RuleSyntaxTree\WardenRule;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 use Warden\RuleSyntaxTree\WardenSyntaxException;
 
-use Warden\RuleSyntaxTree\Parsing\Parser;
+use Warden\RuleSyntaxTree\Parsing\WardenParser;
 
 // -- Parser::parse (rules, not a rule set) ------------------------------------
 
 it('parses source and bindings into a flat list of rules', function () {
-    $rules = Parser::parse('if is_teacher they can view if is_admin they can edit');
+    $rules = WardenParser::parse('if is_teacher they can view if is_admin they can edit');
 
     expect($rules)->toBeArray()->toHaveCount(2);
     expect($rules[0])->toBeInstanceOf(WardenRule::class);
@@ -22,7 +22,7 @@ it('parses source and bindings into a flat list of rules', function () {
 });
 
 it('resolves bindings through Parser::parse', function () {
-    $rules = Parser::parse('if is_owner(:id) they can view', ['id' => 'x-1']);
+    $rules = WardenParser::parse('if is_owner(:id) they can view', ['id' => 'x-1']);
 
     expect($rules[0]->conditions->parameters)->toBe(['x-1']);
 });
