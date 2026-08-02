@@ -4,7 +4,6 @@ require_once __DIR__.'/Support/TestSupport.php';
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Nette\Utils\Helpers;
 use Warden\AbilityMatchMode;
 use Warden\RuleSyntaxTree\Parsing\WardenParser;
 use Warden\RuleSyntaxTree\WardenRuleSet;
