@@ -28,7 +28,7 @@ readonly class WardenRuleSet
         string $syntax,
         array $bindings = [],
     ): self {
-        return (new Parser($syntax, $bindings))->parseRuleSet($entityName);
+        return new self($entityName, Parser::parse($syntax, $bindings));
     }
 
     /**

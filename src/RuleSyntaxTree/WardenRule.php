@@ -23,7 +23,7 @@ readonly class WardenRule
         string $syntax,
         array $bindings = [],
     ): self {
-        return (new Parser($syntax, $bindings))->parseRule();
+        return Parser::parseSingleRule($syntax, $bindings);
     }
 
 }

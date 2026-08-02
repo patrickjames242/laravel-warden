@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
 use Warden\AbilityMatchMode;
 use Warden\RuleSyntaxTree\ConditionResolver;
+use Warden\RuleSyntaxTree\WardenRule;
 use Warden\Schema\Concerns\BuildsAccessQueries;
 use Warden\Schema\Concerns\ReflectsSchemaDefinition;
 use Warden\Schema\Concerns\ResolvesConditions;
@@ -51,6 +52,32 @@ abstract class WardenSchema implements ConditionResolver
     public function __construct()
     {
         $this->abilityLookup = array_fill_keys(static::getAbilities(), true);
+    }
+
+    /**
+     * Rules that are always in force for this schema, regardless of what the
+     * resolver returns. They are merged into every resolved rule set before
+     * compilation, so they are validated and compiled exactly like resolver
+     * rules (deny-overrides still applies across both).
+     *
+     * Override to establish baseline access — e.g. a super-admin escape hatch or
+     * a universal deny:
+     *
+     * ```php
+     * protected function implicitRules(): array
+     * {
+     *     return [
+     *         WardenRule::fromSyntax('if is_super_admin they can *'),
+     *         WardenRule::fromSyntax('if is_suspended they cannot *'),
+     *     ];
+     * }
+     * ```
+     *
+     * @return array<int, WardenRule>
+     */
+    protected function implicitRules(): array
+    {
+        return [];
     }
 
     public static function userHasAbilities(

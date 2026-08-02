@@ -200,6 +200,15 @@ trait BuildsAccessQueries
             model: static::model !== '' ? static::model : null,
         ));
 
+        $implicitRules = $this->implicitRules();
+
+        if ($implicitRules !== []) {
+            $ruleSet = new WardenRuleSet($ruleSet->entityName, [
+                ...$implicitRules,
+                ...$ruleSet->rules,
+            ]);
+        }
+
         $this->compiler()->validate($ruleSet);
 
         return $ruleSet;

@@ -8,7 +8,6 @@ use Warden\RuleSyntaxTree\IBooleanExpressionNode;
 use Warden\RuleSyntaxTree\NotNode;
 use Warden\RuleSyntaxTree\OrNode;
 use Warden\RuleSyntaxTree\WardenRule;
-use Warden\RuleSyntaxTree\WardenRuleSet;
 use Warden\RuleSyntaxTree\WardenSyntaxException;
 
 /**
@@ -39,7 +38,7 @@ final class Parser
     /**
      * @param array<int|string, mixed> $bindings
      */
-    public function __construct(
+    private function __construct(
         private readonly string $source,
         array $bindings = [],
     ) {
@@ -47,30 +46,51 @@ final class Parser
         $this->bindings = new BindingState($source, $bindings);
     }
 
-    public function parseRuleSet(string $entityName): WardenRuleSet
+    /**
+     * Parse Warden syntax into a flat list of rules, resolving $bindings inline.
+     *
+     * @param array<int|string, mixed> $bindings
+     * @return list<WardenRule>
+     */
+    public static function parse(string $source, array $bindings = []): array
     {
-        $rules = $this->parseRules();
-        $this->expect(TokenType::EOF, 'Unexpected token; expected end of input.');
-        $this->bindings->finalize($this->peek());
-
-        return new WardenRuleSet($entityName, $rules);
+        return (new self($source, $bindings))->parseComplete();
     }
 
-    public function parseRule(): WardenRule
+    /**
+     * Parse source that must contain exactly one rule.
+     *
+     * @param array<int|string, mixed> $bindings
+     */
+    public static function parseSingleRule(string $source, array $bindings = []): WardenRule
     {
-        $rules = $this->parseRules();
-        $this->expect(TokenType::EOF, 'Unexpected token; expected end of input.');
-        $this->bindings->finalize($this->peek());
+        $parser = new self($source, $bindings);
+        $rules = $parser->parseComplete();
 
         if ($rules === []) {
-            throw $this->errorAtCurrent('Expected a rule.');
+            throw $parser->errorAtCurrent('Expected a rule.');
         }
 
         if (count($rules) > 1) {
-            throw $this->errorAtCurrent('Expected a single rule but found multiple.');
+            throw $parser->errorAtCurrent('Expected a single rule but found multiple.');
         }
 
         return $rules[0];
+    }
+
+    /**
+     * Parse the full input to rules, asserting a clean end and that every
+     * binding was consumed.
+     *
+     * @return list<WardenRule>
+     */
+    private function parseComplete(): array
+    {
+        $rules = $this->parseRules();
+        $this->expect(TokenType::EOF, 'Unexpected token; expected end of input.');
+        $this->bindings->finalize($this->peek());
+
+        return $rules;
     }
 
     /**

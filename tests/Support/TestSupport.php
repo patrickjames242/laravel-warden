@@ -11,6 +11,7 @@ use Warden\Facades\Warden;
 use Warden\HasWardenSchema;
 use Warden\PermissionResolutionContext;
 use Warden\PermissionResolver;
+use Warden\RuleSyntaxTree\WardenRule;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 use Warden\Schema\WardenSchema;
 use Warden\WardenManager;
@@ -142,6 +143,18 @@ class WardenMismatchedScopedModel extends Model
 class WardenScopedModelSchema extends WardenTestSchema
 {
     public const model = WardenScopedModel::class;
+}
+
+class WardenImplicitRulesSchema extends WardenTestSchema
+{
+    protected function implicitRules(): array
+    {
+        return [
+            // Always grant publish, and never allow archive, regardless of the resolver.
+            WardenRule::fromSyntax('they can publish'),
+            WardenRule::fromSyntax('they cannot archive'),
+        ];
+    }
 }
 
 class FakeWardenPermissionResolver implements PermissionResolver

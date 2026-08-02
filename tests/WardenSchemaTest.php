@@ -133,6 +133,42 @@ it('throws when the rule set names an undeclared condition', function () {
         ->toThrow(InvalidArgumentException::class, 'Condition [is_wizard] is not declared by the schema');
 });
 
+// -- implicit rules -----------------------------------------------------------
+
+it('always applies implicit rules, even when the resolver returns nothing', function () {
+    seedCourseSections();
+    bindWardenRules(''); // resolver contributes no rules
+
+    $user = makeWardenTestUser('teacher-role');
+
+    // `publish` comes solely from the schema's implicitRules().
+    expect(WardenImplicitRulesSchema::userHasAbilities('publish', 'teacher:teacher-role', $user))->toBeTrue();
+    expect(WardenImplicitRulesSchema::userHasAbilities('publish', 'other-section', $user))->toBeTrue();
+    expect(WardenImplicitRulesSchema::userHasAbilities('view', 'teacher:teacher-role', $user))->toBeFalse();
+});
+
+it('merges implicit rules with resolver rules', function () {
+    seedCourseSections();
+    bindWardenRules('if is_teacher they can view');
+
+    $user = makeWardenTestUser('teacher-role');
+
+    // view from the resolver (teacher row only), publish from implicit rules (every row).
+    expect(WardenImplicitRulesSchema::userHasAbilities('view', 'teacher:teacher-role', $user))->toBeTrue();
+    expect(WardenImplicitRulesSchema::userHasAbilities('view', 'other-section', $user))->toBeFalse();
+    expect(WardenImplicitRulesSchema::userHasAbilities('publish', 'other-section', $user))->toBeTrue();
+});
+
+it('lets an implicit unconditional cannot override a resolver grant (deny-overrides)', function () {
+    seedCourseSections();
+    bindWardenRules('they can archive'); // resolver grants archive unconditionally
+
+    $user = makeWardenTestUser('teacher-role');
+
+    // implicitRules() has `they cannot archive`, which wins.
+    expect(WardenImplicitRulesSchema::userHasAbilities('archive', 'teacher:teacher-role', $user))->toBeFalse();
+});
+
 // -- reflection helpers -------------------------------------------------------
 
 it('returns the full reflected list of abilities', function () {
