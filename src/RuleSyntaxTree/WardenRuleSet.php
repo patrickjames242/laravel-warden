@@ -2,6 +2,9 @@
 
 namespace Warden\RuleSyntaxTree;
 
+use InvalidArgumentException;
+use Warden\RuleSyntaxTree\Parsing\Parser;
+
 readonly class WardenRuleSet
 {
 
@@ -25,8 +28,7 @@ readonly class WardenRuleSet
         string $syntax,
         array $bindings = [],
     ): self {
-        // TODO: parse $syntax into WardenRule[] (resolving $bindings) and construct.
-//        throw new \RuntimeException('Not implemented.');
+        return (new Parser($syntax, $bindings))->parseRuleSet($entityName);
     }
 
     /**
@@ -40,8 +42,21 @@ readonly class WardenRuleSet
         string $entityName,
         WardenRule|array ...$rules,
     ): self {
-        // TODO: flatten $rules (variadic or a single array) and construct.
-//        throw new \RuntimeException('Not implemented.');
+        $flattened = [];
+
+        foreach ($rules as $rule) {
+            foreach (is_array($rule) ? $rule : [$rule] as $one) {
+                if (! $one instanceof WardenRule) {
+                    throw new InvalidArgumentException(
+                        sprintf('fromRules expects WardenRule instances, got %s.', get_debug_type($one))
+                    );
+                }
+
+                $flattened[] = $one;
+            }
+        }
+
+        return new self($entityName, $flattened);
     }
 
 }

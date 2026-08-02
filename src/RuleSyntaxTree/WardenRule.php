@@ -2,6 +2,8 @@
 
 namespace Warden\RuleSyntaxTree;
 
+use Warden\RuleSyntaxTree\Parsing\Parser;
+
 readonly class WardenRule
 {
 
@@ -21,8 +23,7 @@ readonly class WardenRule
         string $syntax,
         array $bindings = [],
     ): self {
-        // TODO: parse a single rule from $syntax (resolving $bindings) and construct.
-//        throw new \RuntimeException('Not implemented.');
+        return (new Parser($syntax, $bindings))->parseRule();
     }
 
 }
