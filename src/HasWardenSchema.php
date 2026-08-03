@@ -30,6 +30,22 @@ trait HasWardenSchema
     }
 
     /**
+     * Check whether the user has the given ability (or abilities) against this
+     * model instance. Runs one targeted EXISTS query — avoid calling it per row
+     * in a loop; use the selectAbilities/loadAbilities scopes for collections.
+     *
+     * @param  string|array<int, string>  $abilities
+     */
+    public function hasAbility(
+        string|array $abilities,
+        ?Authenticatable $user = null,
+        AbilityMatchMode $matchMode = AbilityMatchMode::ALL
+    ): bool
+    {
+        return $this->wardenSchema()::userHasAbilities($abilities, $this, $user, $matchMode);
+    }
+
+    /**
      * @return array<int, string>
      */
     public static function getUserAbilities(Model|string|null $target = null, ?Authenticatable $user = null): array

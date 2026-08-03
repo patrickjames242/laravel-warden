@@ -262,6 +262,21 @@ it('forwards static ability helpers through the model trait', function () {
     expect(WardenScopedModel::getUserAbilities(null, $user))->toBe(['publish']);
 });
 
+it('checks abilities against a model instance through the trait', function () {
+    seedCourseSections();
+    bindWardenRules('they can publish if is_teacher they can view');
+
+    $user = makeWardenTestUser('teacher-role');
+
+    $granted = WardenScopedModel::query()->find('teacher:teacher-role');
+    $denied = WardenScopedModel::query()->find('other-section');
+
+    expect($granted->hasAbility('view', $user))->toBeTrue();
+    expect($denied->hasAbility('view', $user))->toBeFalse();
+    expect($granted->hasAbility(['view', 'create'], $user))->toBeFalse();
+    expect($granted->hasAbility(['view', 'create'], $user, AbilityMatchMode::ANY))->toBeTrue();
+});
+
 it('throws when the model returns a schema for a different host model', function () {
     expect(fn () => WardenMismatchedScopedModel::query()->hasAbility('view', makeWardenTestUser('teacher-role'))->toRawSql())
         ->toThrow(LogicException::class, 'must manage model');
