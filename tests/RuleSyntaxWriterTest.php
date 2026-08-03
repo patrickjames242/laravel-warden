@@ -1,0 +1,155 @@
+<?php
+
+use Warden\RuleSyntaxTree\BoundSyntax;
+use Warden\RuleSyntaxTree\ConditionNode;
+use Warden\RuleSyntaxTree\Parsing\WardenParser;
+use Warden\RuleSyntaxTree\WardenRule;
+use Warden\RuleSyntaxTree\WardenRuleSet;
+
+// -- formatting ---------------------------------------------------------------
+
+it('formats if on one line, can and cannot on their own lines', function () {
+    $rule = WardenRule::fromSyntax('if is_self they can view, update they cannot delete');
+
+    expect($rule->toSyntax())->toBe(<<<'TXT'
+        if is_self
+        they can view, update
+        they cannot delete
+        TXT);
+});
+
+it('omits the if line for an unconditional rule', function () {
+    $rule = WardenRule::fromSyntax('they can view');
+
+    expect($rule->toSyntax())->toBe('they can view');
+});
+
+it('separates rules in a set with a blank line', function () {
+    $set = WardenRuleSet::fromSyntax('docs', 'if is_self they can view if is_manager they can approve');
+
+    expect($set->toSyntax())->toBe(<<<'TXT'
+        if is_self
+        they can view
+
+        if is_manager
+        they can approve
+        TXT);
+});
+
+it('renders wildcard abilities verbatim', function () {
+    $rule = WardenRule::fromSyntax('if is_admin they can *');
+
+    expect($rule->toSyntax())->toBe("if is_admin\nthey can *");
+});
+
+// -- minimal parenthesization (not > and > or) --------------------------------
+
+it('drops redundant parens but keeps semantically necessary ones', function (string $in, string $expectedIf) {
+    expect(WardenRule::fromSyntax("if $in they can x")->toSyntax())->toBe("if $expectedIf\nthey can x");
+})->with([
+    'and binds tighter than or' => ['a and b or c', 'a and b or c'],
+    'or under and needs parens'  => ['(a or b) and c', '(a or b) and c'],
+    'redundant parens removed'   => ['a and (b and c)', 'a and b and c'],
+    'not group keeps parens'     => ['not (a and b)', 'not (a and b)'],
+    'not condition no parens'    => ['not a and b', 'not a and b'],
+    '! normalized to not'        => ['!a', 'not a'],
+]);
+
+// -- inline literals ----------------------------------------------------------
+
+it('writes scalar condition parameters as inline literals', function () {
+    $rule = WardenRule::fromSyntax("if in_department('sales', 'eng') they can view");
+
+    expect($rule->toSyntax())->toBe("if in_department('sales', 'eng')\nthey can view");
+});
+
+it('escapes quotes and backslashes in string literals', function () {
+    $rule = WardenRule::build()->if('eq', ["a'b\\c"])->theyCan('view')->toRule();
+
+    expect($rule->toSyntax())->toBe("if eq('a\\'b\\\\c')\nthey can view");
+    // and it re-parses back to the same value
+    expect(WardenRule::fromSyntax($rule->toSyntax())->conditions->parameters)->toBe(["a'b\\c"]);
+});
+
+it('preserves the int/float distinction and renders bool/null', function () {
+    $rule = WardenRule::build()->if('c', [1, 1.0, 2.5, true, false, null])->theyCan('view')->toRule();
+
+    expect($rule->toSyntax())->toBe("if c(1, 1.0, 2.5, true, false, null)\nthey can view");
+});
+
+it('throws when a parameter cannot be written inline', function () {
+    $rule = WardenRule::build()->if('c', [['a', 'b']])->theyCan('view')->toRule();
+
+    expect(fn () => $rule->toSyntax())->toThrow(LogicException::class);
+});
+
+// -- bound form ---------------------------------------------------------------
+
+it('extracts every parameter as a positional placeholder', function () {
+    $rule = WardenRule::build()->if('in_department', ['sales', 'eng'])->theyCan('view')->toRule();
+
+    $bound = $rule->toBoundSyntax();
+
+    expect($bound)->toBeInstanceOf(BoundSyntax::class);
+    expect($bound->syntax)->toBe("if in_department(?, ?)\nthey can view");
+    expect($bound->bindings)->toBe(['sales', 'eng']);
+});
+
+it('binds any value losslessly, including non-inlinable ones', function () {
+    $ids = [1, 2, 3];
+    $rule = WardenRule::build()->if('in', [$ids])->theyCan('view')->toRule();
+
+    $bound = $rule->toBoundSyntax();
+
+    expect($bound->syntax)->toBe("if in(?)\nthey can view");
+    expect($bound->bindings)->toBe([$ids]);
+});
+
+it('orders bindings left-to-right across the whole set', function () {
+    $set = WardenRuleSet::fromSyntax(
+        'docs',
+        'if a(?) they can view if b(?, ?) they can edit',
+        ['first', 'second', 'third'],
+    );
+
+    $bound = $set->toBoundSyntax();
+
+    expect($bound->syntax)->toBe(<<<'TXT'
+        if a(?)
+        they can view
+
+        if b(?, ?)
+        they can edit
+        TXT);
+    expect($bound->bindings)->toBe(['first', 'second', 'third']);
+});
+
+// -- round-trip ---------------------------------------------------------------
+
+it('round-trips the inline form back through the parser', function (string $syntax) {
+    $set = WardenRuleSet::fromSyntax('docs', $syntax);
+    $reparsed = WardenRuleSet::fromSyntax('docs', $set->toSyntax());
+
+    // toSyntax is idempotent: a second render matches the first.
+    expect($reparsed->toSyntax())->toBe($set->toSyntax());
+})->with([
+    'simple'      => ['if is_self they can view'],
+    'precedence'  => ['if a or b and not c they can view, update'],
+    'grouping'    => ['if (a or b) and c they can view they cannot delete'],
+    'literals'    => ["if seen_recently(30, true) they can view"],
+    'multi-rule'  => ['they can list if is_admin they can * if is_suspended they cannot *'],
+]);
+
+it('round-trips the bound form back through the parser', function () {
+    $set = WardenRuleSet::fromSyntax(
+        'docs',
+        "if in_department(?, ?) they can view they cannot delete if is_admin they can *",
+        ['sales', 'eng'],
+    );
+
+    $bound = $set->toBoundSyntax();
+    $reparsed = WardenRuleSet::fromSyntax('docs', $bound->syntax, $bound->bindings);
+
+    expect($reparsed->toBoundSyntax()->syntax)->toBe($bound->syntax);
+    expect($reparsed->toBoundSyntax()->bindings)->toBe(['sales', 'eng']);
+});

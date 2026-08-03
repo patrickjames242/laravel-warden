@@ -94,4 +94,26 @@ readonly class WardenRuleSet
         return self::fromRules($entityName, $builders);
     }
 
+    /**
+     * Render every rule back to the string DSL with scalar condition parameters
+     * inlined as literals, one blank line between rules. Throws if a parameter
+     * has no inline representation — use {@see toBoundSyntax()} for those.
+     * Round-trips via `WardenRuleSet::fromSyntax($this->entityName, $syntax)`.
+     */
+    public function toSyntax(): string
+    {
+        return RuleSyntaxWriter::toSyntax(...$this->rules);
+    }
+
+    /**
+     * Render every rule to `?`-parameterized syntax plus one flat, left-to-right
+     * positional bindings list spanning the whole set. Lossless for any value.
+     * Round-trips via
+     * `WardenRuleSet::fromSyntax($this->entityName, $result->syntax, $result->bindings)`.
+     */
+    public function toBoundSyntax(): BoundSyntax
+    {
+        return RuleSyntaxWriter::toBoundSyntax(...$this->rules);
+    }
+
 }
