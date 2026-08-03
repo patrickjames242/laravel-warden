@@ -6,7 +6,7 @@ namespace Warden;
 
 use Warden\RuleSyntaxTree\WardenRuleSet;
 
-interface PermissionResolver
+interface RuleResolver
 {
     /**
      * Return the rule set that governs this user's access to the entity in
@@ -14,5 +14,5 @@ interface PermissionResolver
      * is free to build it however it likes (WardenRuleSet::fromSyntax, a database
      * lookup, hardcoded rules, ...).
      */
-    public function resolve(PermissionResolutionContext $context): WardenRuleSet;
+    public function resolve(RuleResolutionContext $context): WardenRuleSet;
 }

@@ -122,10 +122,10 @@ final class RuleSyntaxWriter
     private function writeCondition(ConditionNode $node): string
     {
         if ($node->parameters === []) {
-            return $node->conditionName;
+            return $node->conditionKey;
         }
 
-        return $node->conditionName . '(' . implode(', ', array_map($this->arg(...), $node->parameters)) . ')';
+        return $node->conditionKey . '(' . implode(', ', array_map($this->arg(...), $node->parameters)) . ')';
     }
 
     private function arg(mixed $value): string

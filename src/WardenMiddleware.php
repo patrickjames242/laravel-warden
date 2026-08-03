@@ -50,12 +50,12 @@ class WardenMiddleware
         string $target
     ): string {
         if (is_subclass_of($target, WardenSchema::class)) {
-            return $target::permissionsBaseName();
+            return $target::schemaKey();
         }
 
         if (is_subclass_of($target, Model::class)) {
             try {
-                return Warden::getSchemaForModelClass($target)::permissionsBaseName();
+                return Warden::getSchemaForModelClass($target)::schemaKey();
             } catch (\OutOfBoundsException) {
             }
 
@@ -66,7 +66,7 @@ class WardenMiddleware
                 method_exists($model, 'wardenSchema')
                 && is_a($model->wardenSchema(), WardenSchema::class, true)
             ) {
-                return $model->wardenSchema()::permissionsBaseName();
+                return $model->wardenSchema()::schemaKey();
             }
 
             throw new InvalidArgumentException(
@@ -102,7 +102,7 @@ class WardenMiddleware
     }
 
     /**
-     * Guard `view` access for either a no-target permission base name or a targeted route parameter.
+     * Guard `view` access for either a no-target schema key or a targeted route parameter.
      *
      * This helper has two modes:
      * - If no closure is provided, it returns the middleware string for manual route assignment.
@@ -126,7 +126,7 @@ class WardenMiddleware
     }
 
     /**
-     * Guard `create` access for either a no-target permission base name or a targeted route parameter.
+     * Guard `create` access for either a no-target schema key or a targeted route parameter.
      *
      * This helper has two modes:
      * - If no closure is provided, it returns the middleware string for manual route assignment.
@@ -150,7 +150,7 @@ class WardenMiddleware
     }
 
     /**
-     * Guard `update` access for either a no-target permission base name or a targeted route parameter.
+     * Guard `update` access for either a no-target schema key or a targeted route parameter.
      *
      * This helper has two modes:
      * - If no closure is provided, it returns the middleware string for manual route assignment.
@@ -174,7 +174,7 @@ class WardenMiddleware
     }
 
     /**
-     * Guard `delete` access for either a no-target permission base name or a targeted route parameter.
+     * Guard `delete` access for either a no-target schema key or a targeted route parameter.
      *
      * This helper has two modes:
      * - If no closure is provided, it returns the middleware string for manual route assignment.
@@ -198,7 +198,7 @@ class WardenMiddleware
     }
 
     /**
-     * Guard `archive` access for either a no-target permission base name or a targeted route parameter.
+     * Guard `archive` access for either a no-target schema key or a targeted route parameter.
      *
      * This helper has two modes:
      * - If no closure is provided, it returns the middleware string for manual route assignment.
@@ -224,7 +224,7 @@ class WardenMiddleware
     /**
      * Guard the `manage` capability of a section (a capability schema such as
      * `settings`). Unlike the standard abilities, `manage` gates a whole section
-     * rather than a model action, so it takes a permission base name, never a
+     * rather than a model action, so it takes a schema key, never a
      * route-bound model. Two modes: returns the middleware string, or wraps the
      * grouped routes when given a closure.
      *
@@ -283,7 +283,7 @@ class WardenMiddleware
         }
 
         try {
-            $schemaClass = Warden::getSchemaForPermissionBaseName($target);
+            $schemaClass = Warden::getSchemaForKey($target);
         } catch (\OutOfBoundsException) {
             $schemaClass = null;
         }

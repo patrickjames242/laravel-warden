@@ -1,7 +1,7 @@
 # Laravel Warden
 
 Schema-based authorization for Laravel that compiles a small, human-readable
-permission language **directly into SQL** — so "what can this user do?" and
+rule language **directly into SQL** — so "what can this user do?" and
 "which rows can this user touch?" are answered by the database in a single query,
 not by loading records and looping in PHP.
 
@@ -11,7 +11,7 @@ they can view, update
 they cannot delete
 ```
 
-That block is a real, complete permission rule. Warden turns it into a `WHERE`
+That block is a real, complete Warden rule. Warden turns it into a `WHERE`
 clause. This README explains the problem Warden solves, the language above in
 full detail, and exactly how you hand rules to the library.
 
@@ -39,7 +39,7 @@ full detail, and exactly how you hand rules to the library.
   - [Formal grammar](#formal-grammar)
   - [Syntax errors](#syntax-errors)
 - [Providing rules to Warden](#providing-rules-to-warden)
-  - [The `PermissionResolver`](#the-permissionresolver)
+  - [The `RuleResolver`](#the-ruleresolver)
   - [Building a rule set](#building-a-rule-set)
   - [Building rules programmatically](#building-rules-programmatically)
   - [Implicit rules](#implicit-rules)
@@ -194,7 +194,7 @@ into SQL.
        your data (roles, grants)                    request-time
                 │                                         │
                 ▼                                         ▼
-        PermissionResolver ──▶ WardenRuleSet ──▶ RuleSetCompiler ──▶ SQL WHERE / column
+        RuleResolver ──▶ WardenRuleSet ──▶ RuleSetCompiler ──▶ SQL WHERE / column
                                      ▲                    │
                                      │                    │ validated against
                               WardenSchema ───────────────┘
@@ -250,13 +250,13 @@ class TimesheetSchema extends WardenSchema
 
     // Targeted: narrows WHICH timesheet rows the user matches.
     #[ConditionWithTarget]
-    public function conditionIsSelf(Authenticatable $user, Builder $where, string $entitySqlId): Builder
+    public function conditionIsSelf(Authenticatable $user, Builder $where, string $targetSqlId): Builder
     {
         return $where->whereRaw('timesheets.user_id = ?', [$user->getAuthIdentifier()]);
     }
 
     #[ConditionWithTarget]
-    public function conditionInDepartment(Authenticatable $user, Builder $where, string $entitySqlId, array $parameters): Builder
+    public function conditionInDepartment(Authenticatable $user, Builder $where, string $targetSqlId, array $parameters): Builder
     {
         return $where->whereIn('timesheets.department_id', $parameters);
     }
@@ -283,21 +283,21 @@ if is_admin they can *
 ```php
 namespace App\Warden;
 
-use Warden\PermissionResolutionContext;
-use Warden\PermissionResolver;
+use Warden\RuleResolutionContext;
+use Warden\RuleResolver;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 
-class DatabasePermissionResolver implements PermissionResolver
+class DatabaseRuleResolver implements RuleResolver
 {
-    public function resolve(PermissionResolutionContext $context): WardenRuleSet
+    public function resolve(RuleResolutionContext $context): WardenRuleSet
     {
         // Look up the raw rule string + any binding values for this user/resource.
-        [$syntax, $bindings] = MyPermissionStore::for(
+        [$syntax, $bindings] = MyRuleStore::for(
             user: $context->user,
-            resource: $context->permissionBaseName, // 'timesheets'
+            resource: $context->schemaKey, // 'timesheets'
         );
 
-        return WardenRuleSet::fromSyntax($context->permissionBaseName, $syntax, $bindings);
+        return WardenRuleSet::fromSyntax($context->schemaKey, $syntax, $bindings);
     }
 }
 ```
@@ -305,7 +305,7 @@ class DatabasePermissionResolver implements PermissionResolver
 **4. Wire it up** (`config/warden.php`) and use it:
 
 ```php
-'permission_resolver' => App\Warden\DatabasePermissionResolver::class,
+'rule_resolver' => App\Warden\DatabaseRuleResolver::class,
 'schemas' => [App\Warden\TimesheetSchema::class],
 ```
 
@@ -333,13 +333,13 @@ may test. It is registered against a model via the `model` constant.
 class TimesheetSchema extends WardenSchema
 {
     public const model = Timesheet::class;   // the Eloquent model this governs
-    // public const permissionBaseName = 'timesheets'; // optional override
+    // public const schemaKey = 'timesheets'; // optional override
 }
 ```
 
-The **base name** (the resource's identifier in rules and permission lookups) is
+The **schema key** (the resource's identifier in rules and lookups) is
 derived from the model's table name by default (`timesheets`). Override it with
-the `permissionBaseName` constant. A schema may also have **no model**
+the `schemaKey` constant. A schema may also have **no model**
 (`public const model = ''`) — a "capability" schema for things like `settings`
 that only answer no-target checks (see [capability checks](#capability-no-target-checks)).
 
@@ -355,7 +355,7 @@ in rules; the constant's *name* is irrelevant to Warden.
 ```
 
 ```php
-TimesheetSchema::getAbilities(); // ['view', 'approve', ...]
+TimesheetSchema::declaredAbilities(); // ['view', 'approve', ...]
 ```
 
 A rule that names an ability the schema doesn't declare is rejected at compile
@@ -388,7 +388,7 @@ The distinction is: *does this predicate talk about a specific row?*
   public function conditionIsSelf(
       Authenticatable $user,
       Builder $where,          // add your predicate to this
-      string $entitySqlId,     // e.g. "timesheets.id" (the correlated row)
+      string $targetSqlId,     // e.g. "timesheets.id" (the correlated row)
   ): Builder {
       return $where->whereRaw('timesheets.user_id = ?', [$user->getAuthIdentifier()]);
   }
@@ -411,7 +411,7 @@ The distinction is: *does this predicate talk about a specific row?*
   ```
 
 Why the split matters: some checks (**capability checks** and
-`getAbilitiesWithoutEntity`) run with *no row*. In that context a targeted
+`getAbilitiesWithoutTarget`) run with *no row*. In that context a targeted
 condition can't be evaluated, so Warden treats it as **false** (and therefore
 `not <targeted>` as **true**). No-target conditions still evaluate normally.
 
@@ -423,14 +423,14 @@ condition can't be evaluated, so Warden treats it as **false** (and therefore
 
 A condition can take arguments from the rule (`in_department('sales')`). The
 resolved arguments arrive as one trailing **`array $parameters`** bag — always
-the last argument, after `$entitySqlId` for targeted conditions:
+the last argument, after `$targetSqlId` for targeted conditions:
 
 ```php
 #[ConditionWithTarget]
 public function conditionInDepartment(
     Authenticatable $user,
     Builder $where,
-    string $entitySqlId,
+    string $targetSqlId,
     array $parameters,          // the rule's arguments, in order
 ): Builder {
     // in_department('sales', 'eng')  ->  $parameters === ['sales', 'eng']
@@ -438,7 +438,7 @@ public function conditionInDepartment(
 }
 ```
 
-A no-target condition that takes parameters omits `$entitySqlId`:
+A no-target condition that takes parameters omits `$targetSqlId`:
 `conditionX(Authenticatable $user, Builder $where, array $parameters)`. A
 condition that ignores arguments simply doesn't declare the trailing bag — PHP
 drops the extra.
@@ -657,40 +657,40 @@ happens later, at **compile time**, when a rule set is compiled against a schema
 
 Rules are data. Warden never invents them; it asks *your* resolver for them.
 
-### The `PermissionResolver`
+### The `RuleResolver`
 
-Implement one interface. Given a context (the user, the resource's base name, the
+Implement one interface. Given a context (the user, the resource's schema key, the
 schema class, and the model class), return the `WardenRuleSet` that governs this
 user's access to that resource.
 
 ```php
-use Warden\PermissionResolutionContext;
-use Warden\PermissionResolver;
+use Warden\RuleResolutionContext;
+use Warden\RuleResolver;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 
-class DatabasePermissionResolver implements PermissionResolver
+class DatabaseRuleResolver implements RuleResolver
 {
-    public function resolve(PermissionResolutionContext $context): WardenRuleSet
+    public function resolve(RuleResolutionContext $context): WardenRuleSet
     {
         // $context->user               — the Authenticatable being checked
-        // $context->permissionBaseName — e.g. 'timesheets'
+        // $context->schemaKey — e.g. 'timesheets'
         // $context->schema             — the schema class string
         // $context->model              — the model class string, or null
 
         $grants = DB::table('role_permissions')
             ->where('role_id', $context->user->role_id)
-            ->where('resource', $context->permissionBaseName)
+            ->where('resource', $context->schemaKey)
             ->pluck('rule');                    // ['if is_self they can view', ...]
 
         return WardenRuleSet::fromSyntax(
-            $context->permissionBaseName,
+            $context->schemaKey,
             $grants->implode("\n"),             // rules concatenate freely
         );
     }
 }
 ```
 
-The resolver is where *your* permission model meets Warden. Store rule strings in
+The resolver is where *your* access-control model meets Warden. Store rule strings in
 a table, compose them from role flags, read them from JWT claims — whatever fits.
 Warden only cares that you return a `WardenRuleSet`.
 
@@ -854,7 +854,7 @@ Warden ships **no** default resolver — you must configure one in
 
 ```php
 return [
-    'permission_resolver' => App\Warden\DatabasePermissionResolver::class,
+    'rule_resolver' => App\Warden\DatabaseRuleResolver::class,
 
     'schemas' => [
         App\Warden\TimesheetSchema::class,
@@ -947,7 +947,7 @@ Timesheet::query()->selectAbilities(onlyAbilities: ['update'])->get();
 
 ### Capability (no-target) checks
 
-Not every permission is about a row. "Can this user *create* timesheets?" or "can
+Not every check is about a row. "Can this user *create* timesheets?" or "can
 they access *settings*?" have no target. Pass `null` as the target (or omit it):
 
 ```php
@@ -983,7 +983,7 @@ Warden registers a `warden` route middleware. Build the middleware string with
 ```php
 use Warden\WardenMiddleware;
 
-// Capability (no-target) — gate a create route by base name:
+// Capability (no-target) — gate a create route by schema key:
 Route::post('/timesheets', ...)->middleware(WardenMiddleware::canCreate('timesheets'));
 
 // Targeted — gate by a route-model-bound parameter:
@@ -998,7 +998,7 @@ WardenMiddleware::guard('timesheets', 'view', function () {
 
 There are `canView`, `canCreate`, `canUpdate`, `canDelete`, `canArchive`, and
 `canManage` shortcuts. Under the hood the middleware resolves the target to a
-schema (by base name or by the route-bound model's class) and calls
+schema (by schema key or by the route-bound model's class) and calls
 `userHasAbilities`, aborting `403` on failure.
 
 ---
@@ -1050,10 +1050,10 @@ fake resolver that returns a fixed `WardenRuleSet`, seed a table, and assert wha
 comes back.
 
 ```php
-app()->instance(PermissionResolver::class, new class implements PermissionResolver {
-    public function resolve(PermissionResolutionContext $context): WardenRuleSet
+app()->instance(RuleResolver::class, new class implements RuleResolver {
+    public function resolve(RuleResolutionContext $context): WardenRuleSet
     {
-        return WardenRuleSet::fromSyntax($context->permissionBaseName, 'if is_self they can view');
+        return WardenRuleSet::fromSyntax($context->schemaKey, 'if is_self they can view');
     }
 });
 
@@ -1067,7 +1067,7 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 
 **Define a schema** — `extends Warden\Schema\WardenSchema`
 - `const model` — managed Eloquent model (or `''` for a capability schema)
-- `const permissionBaseName` — optional base-name override
+- `const schemaKey` — optional schema-key override
 - `#[Ability] const X = '...'` — declare an ability
 - `#[ConditionWithTarget]` / `#[ConditionWithoutTarget]` methods — declare conditions
 - `protected function implicitRules(): array` — always-on rules
@@ -1080,10 +1080,10 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 - `WardenParser::parseSingleRule(string $source, array $bindings = []): WardenRule`
 - `WardenRule::build()` — fluent builder: `->if/andIf/orIf/ifNot/…`, `->theyCan/theyCannot`, `->toRule()`
 
-**Provide rules** — implement `Warden\PermissionResolver`
-- `resolve(PermissionResolutionContext $context): WardenRuleSet`
-- context: `->user`, `->permissionBaseName`, `->schema`, `->model`
-- register in `config/warden.php` → `permission_resolver`, `schemas`
+**Provide rules** — implement `Warden\RuleResolver`
+- `resolve(RuleResolutionContext $context): WardenRuleSet`
+- context: `->user`, `->schemaKey`, `->schema`, `->model`
+- register in `config/warden.php` → `rule_resolver`, `schemas`
 
 **Check access** — `use Warden\HasWardenSchema` on the model
 - `Model::userHasAbilities($abilities, $target = null, $user = null, $matchMode = ALL): bool`

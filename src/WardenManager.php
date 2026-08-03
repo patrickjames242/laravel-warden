@@ -13,8 +13,8 @@ use Warden\Schema\WardenSchema;
  *
  * Responsible for:
  * - mapping model classes to schema classes
- * - mapping permission base names to schema classes
- * - validating persisted permission strings against registered schemas
+ * - mapping schema keys to schema classes
+ * - validating persisted rule sets against registered schemas
  *
  * Bound as a singleton and reached through the Warden facade. The registry is
  * built from the `warden.schemas` config.
@@ -29,7 +29,7 @@ class WardenManager
     /**
      * @var array<string, class-string<WardenSchema>>
      */
-    private array $permissionBaseNamesToSchemas = [];
+    private array $schemaKeysToSchemas = [];
 
     /**
      * @param  array<int, class-string<WardenSchema>>  $schemaClasses
@@ -39,10 +39,10 @@ class WardenManager
         foreach ($schemaClasses as $schemaClass) {
             $model = $schemaClass::model;
 
-            $permissionBaseName = $schemaClass::permissionsBaseName();
+            $schemaKey = $schemaClass::schemaKey();
 
-            if (isset($this->permissionBaseNamesToSchemas[$permissionBaseName])) {
-                throw new InvalidArgumentException('Duplicate schema for permission base name '.$permissionBaseName);
+            if (isset($this->schemaKeysToSchemas[$schemaKey])) {
+                throw new InvalidArgumentException('Duplicate schema for schema key '.$schemaKey);
             }
 
             /* Capability schemas have no model; only model-backed schemas are
@@ -55,7 +55,7 @@ class WardenManager
                 $this->modelsToSchemas[$model] = $schemaClass;
             }
 
-            $this->permissionBaseNamesToSchemas[$permissionBaseName] = $schemaClass;
+            $this->schemaKeysToSchemas[$schemaKey] = $schemaClass;
         }
     }
 
@@ -75,34 +75,34 @@ class WardenManager
     /**
      * @return class-string<WardenSchema>
      */
-    public function getSchemaForPermissionBaseName(string $permissionBaseName): string
+    public function getSchemaForKey(string $schemaKey): string
     {
-        if (!isset($this->permissionBaseNamesToSchemas[$permissionBaseName])) {
-            throw new OutOfBoundsException(sprintf('No Warden schema registered for permission base name [%s].', $permissionBaseName));
+        if (!isset($this->schemaKeysToSchemas[$schemaKey])) {
+            throw new OutOfBoundsException(sprintf('No Warden schema registered for schema key [%s].', $schemaKey));
         }
 
-        return $this->permissionBaseNamesToSchemas[$permissionBaseName];
+        return $this->schemaKeysToSchemas[$schemaKey];
     }
 
     /**
      * Combined no-target ability bag for multiple schemas. Each argument may be
-     * a WardenSchema class string or a permission base name.
+     * a WardenSchema class string or a schema key.
      *
-     * @return array<string, array{permission_base_name: string, abilities: array<int, string>, target: null}>
+     * @return array<string, array{schema_key: string, abilities: array<int, string>, target: null}>
      */
     public function getNoTargetAbilitiesBag(
         ?Authenticatable $user = null,
-        string ...$schemaClassesOrPermissionBaseNames
+        string ...$schemaClassesOrSchemaKeys
     ): array
     {
-        return collect($schemaClassesOrPermissionBaseNames)
-            ->map(fn (string $schemaClassOrPermissionBaseName): string => $this->resolveSchemaClass(
-                $schemaClassOrPermissionBaseName
+        return collect($schemaClassesOrSchemaKeys)
+            ->map(fn (string $schemaClassOrSchemaKey): string => $this->resolveSchemaClass(
+                $schemaClassOrSchemaKey
             ))
             ->reduce(
                 fn (array $combinedBag, string $schemaClass): array => [
                     ...$combinedBag,
-                    $schemaClass::permissionsBaseName() => $schemaClass::getNoTargetAbilitiesBag($user),
+                    $schemaClass::schemaKey() => $schemaClass::getNoTargetAbilitiesBag($user),
                 ],
                 []
             );
@@ -115,18 +115,18 @@ class WardenManager
      */
     public function registeredSchemas(): array
     {
-        return array_values($this->permissionBaseNamesToSchemas);
+        return array_values($this->schemaKeysToSchemas);
     }
 
     /**
      * @return class-string<WardenSchema>
      */
-    private function resolveSchemaClass(string $schemaClassOrPermissionBaseName): string
+    private function resolveSchemaClass(string $schemaClassOrSchemaKey): string
     {
-        if (is_a($schemaClassOrPermissionBaseName, WardenSchema::class, true)) {
-            return $schemaClassOrPermissionBaseName;
+        if (is_a($schemaClassOrSchemaKey, WardenSchema::class, true)) {
+            return $schemaClassOrSchemaKey;
         }
 
-        return $this->getSchemaForPermissionBaseName($schemaClassOrPermissionBaseName);
+        return $this->getSchemaForKey($schemaClassOrSchemaKey);
     }
 }

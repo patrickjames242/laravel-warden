@@ -122,7 +122,7 @@ it('throws when an ability is not defined on the schema', function () {
 });
 
 it('throws when the rule set names an undeclared ability', function () {
-    bindWardenRules('they can teleport', entityName: 'course_sections');
+    bindWardenRules('they can teleport', schemaKey: 'course_sections');
 
     expect(fn () => (new WardenTestSchema)
         ->filterQuery(makeWardenTestUser('teacher-role'), wardenTestQuery(), 'course_sections.id', 'view'))
@@ -176,7 +176,7 @@ it('lets an implicit unconditional cannot override a resolver grant (deny-overri
 // -- reflection helpers -------------------------------------------------------
 
 it('returns the full reflected list of abilities', function () {
-    expect(WardenTestSchema::getAbilities())->toBe(['create', 'publish', 'archive', 'view', 'update']);
+    expect(WardenTestSchema::declaredAbilities())->toBe(['create', 'publish', 'archive', 'view', 'update']);
 });
 
 it('returns targeted, no-target, and all condition keys', function () {
@@ -185,12 +185,12 @@ it('returns targeted, no-target, and all condition keys', function () {
     expect(WardenTestSchema::conditionKeys())->toBe(['is_advisor', 'is_teacher']);
 });
 
-it('requires an entity sql id for targeted conditions', function () {
+it('requires a target sql id for targeted conditions', function () {
     expect(fn () => (new WardenTestSchema)->applyConditionFilter(
         'is_teacher',
         makeWardenTestUser('teacher-role'),
         wardenTestQuery()
-    ))->toThrow(InvalidArgumentException::class, 'requires an entity SQL id');
+    ))->toThrow(InvalidArgumentException::class, 'requires a target SQL id');
 });
 
 // -- selectAbilitiesInQuery (behavioral) --------------------------------------
@@ -212,16 +212,16 @@ it('computes per-row abilities as a json column', function () {
 
 // -- no-target ability lists --------------------------------------------------
 
-it('returns abilities the user can perform without an entity in one query', function () {
+it('returns abilities the user can perform without a target in one query', function () {
     bindWardenRules('they can publish, view if is_advisor they can create');
 
     $schema = new WardenTestSchema;
     $user = makeWardenTestUser('advisor');
 
-    expect($schema->getAbilitiesWithoutEntity($user))->toBe(['create', 'publish', 'view']);
-    expect($schema->getAbilitiesWithoutEntity($user, ['create', 'publish'], AbilityMatchMode::ALL))
+    expect($schema->getAbilitiesWithoutTarget($user))->toBe(['create', 'publish', 'view']);
+    expect($schema->getAbilitiesWithoutTarget($user, ['create', 'publish'], AbilityMatchMode::ALL))
         ->toBe(['create', 'publish']);
-    expect($schema->getAbilitiesWithoutEntity($user, ['create', 'publish', 'archive'], AbilityMatchMode::ALL))
+    expect($schema->getAbilitiesWithoutTarget($user, ['create', 'publish', 'archive'], AbilityMatchMode::ALL))
         ->toBe([]);
 });
 
@@ -230,22 +230,22 @@ it('grants an ability when a no-target boolean condition evaluates true, denies 
 
     $schema = new WardenBooleanConditionSchema;
 
-    expect($schema->getAbilitiesWithoutEntity(makeWardenTestUser('super-role')))->toBe(['view']);
-    expect($schema->getAbilitiesWithoutEntity(makeWardenTestUser('other-role')))->toBe([]);
+    expect($schema->getAbilitiesWithoutTarget(makeWardenTestUser('super-role')))->toBe(['view']);
+    expect($schema->getAbilitiesWithoutTarget(makeWardenTestUser('other-role')))->toBe([]);
 });
 
 // -- static entry points ------------------------------------------------------
 
-it('checks abilities statically for an entity instance, id, or no target', function () {
+it('checks abilities statically for a target instance, id, or none', function () {
     seedCourseSections();
     bindWardenRules('they can publish if is_teacher they can view, update');
 
     $user = makeWardenTestUser('teacher-role');
-    $entity = new WardenTestModel;
-    $entity->id = 'teacher:teacher-role';
-    $entity->exists = true;
+    $target = new WardenTestModel;
+    $target->id = 'teacher:teacher-role';
+    $target->exists = true;
 
-    expect(WardenTestSchema::userHasAbilities('view', $entity, $user))->toBeTrue();
+    expect(WardenTestSchema::userHasAbilities('view', $target, $user))->toBeTrue();
     expect(WardenTestSchema::userHasAbilities(['view', 'update'], 'teacher:teacher-role', $user))->toBeTrue();
     expect(WardenTestSchema::userHasAbilities('view', 'other-section', $user))->toBeFalse();
     expect(WardenTestSchema::userHasAbilities('publish', null, $user, AbilityMatchMode::ANY))->toBeTrue();

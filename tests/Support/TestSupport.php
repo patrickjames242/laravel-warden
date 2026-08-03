@@ -9,8 +9,8 @@ use Warden\ConditionWithoutTarget;
 use Warden\ConditionWithTarget;
 use Warden\Facades\Warden;
 use Warden\HasWardenSchema;
-use Warden\PermissionResolutionContext;
-use Warden\PermissionResolver;
+use Warden\RuleResolutionContext;
+use Warden\RuleResolver;
 use Warden\RuleSyntaxTree\WardenRule;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 use Warden\Schema\WardenSchema;
@@ -82,9 +82,9 @@ class WardenTestSchema extends WardenSchema
     public const ABILITY_UPDATE = 'update';
 
     #[ConditionWithTarget]
-    public function conditionIsTeacher(Authenticatable $currentUser, BuilderContract $whereClause, string $entitySqlId): BuilderContract
+    public function conditionIsTeacher(Authenticatable $currentUser, BuilderContract $whereClause, string $targetSqlId): BuilderContract
     {
-        return $whereClause->whereRaw("{$entitySqlId} = ?", ["teacher:{$currentUser->role_id}"]);
+        return $whereClause->whereRaw("{$targetSqlId} = ?", ["teacher:{$currentUser->role_id}"]);
     }
 
     #[ConditionWithoutTarget]
@@ -157,11 +157,11 @@ class WardenImplicitRulesSchema extends WardenTestSchema
     }
 }
 
-class FakeWardenPermissionResolver implements PermissionResolver
+class FakeWardenRuleResolver implements RuleResolver
 {
     public function __construct(private WardenRuleSet $ruleSet) {}
 
-    public function resolve(PermissionResolutionContext $context): WardenRuleSet
+    public function resolve(RuleResolutionContext $context): WardenRuleSet
     {
         return $this->ruleSet;
     }
@@ -178,15 +178,15 @@ function useWardenSchemas(array $schemas): void
 }
 
 /**
- * Bind the resolver to a rule set built from Warden syntax. The entity name is
+ * Bind the resolver to a rule set built from Warden syntax. The schema key is
  * irrelevant to the fake (the schema asks for its own rules), so it defaults to
- * the course_sections fixture base name.
+ * the course_sections fixture schema key.
  */
-function bindWardenRules(string $syntax, array $bindings = [], string $entityName = 'course_sections'): void
+function bindWardenRules(string $syntax, array $bindings = [], string $schemaKey = 'course_sections'): void
 {
     app()->instance(
-        PermissionResolver::class,
-        new FakeWardenPermissionResolver(WardenRuleSet::fromSyntax($entityName, $syntax, $bindings))
+        RuleResolver::class,
+        new FakeWardenRuleResolver(WardenRuleSet::fromSyntax($schemaKey, $syntax, $bindings))
     );
 }
 
@@ -195,7 +195,7 @@ function bindWardenRules(string $syntax, array $bindings = [], string $entityNam
  */
 function bindWardenRuleSet(WardenRuleSet $ruleSet): void
 {
-    app()->instance(PermissionResolver::class, new FakeWardenPermissionResolver($ruleSet));
+    app()->instance(RuleResolver::class, new FakeWardenRuleResolver($ruleSet));
 }
 
 function makeWardenTestUser(?string $roleId = 'role-1'): Authenticatable

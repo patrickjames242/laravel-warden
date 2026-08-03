@@ -19,7 +19,7 @@ function registerWardenTestRoute(string $uri, string $middleware): void
         ->get($uri, fn () => response('ok'));
 }
 
-it('allows non-target checks by permission base name', function () {
+it('allows non-target checks by schema key', function () {
     bindWardenRules('they can publish');
 
     registerWardenTestRoute('/__warden/non-target', 'warden:course_sections,all,publish');

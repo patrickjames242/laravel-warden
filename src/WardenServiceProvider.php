@@ -20,12 +20,12 @@ final class WardenServiceProvider extends ServiceProvider
         ));
 
         /* Warden ships no default resolver; the consumer must configure one. */
-        $this->app->bind(PermissionResolver::class, function (Application $app): PermissionResolver {
-            $resolverClass = $app['config']->get('warden.permission_resolver');
+        $this->app->bind(RuleResolver::class, function (Application $app): RuleResolver {
+            $resolverClass = $app['config']->get('warden.rule_resolver');
 
             if ($resolverClass === null) {
                 throw new RuntimeException(
-                    'No Warden permission resolver configured. Set warden.permission_resolver to a class implementing '.PermissionResolver::class.'.'
+                    'No Warden rule resolver configured. Set warden.rule_resolver to a class implementing '.RuleResolver::class.'.'
                 );
             }
 

@@ -2,19 +2,19 @@
 
 return [
     /*
-     * The permission resolver: a class implementing Warden\PermissionResolver.
+     * The rule resolver: a class implementing Warden\RuleResolver.
      *
      * Warden ships no default — you must provide one. It maps the current user
      * to the WardenRuleSet that governs their access to an entity, built from
-     * wherever your permissions live: role/permission tables, JWT claims, a
+     * wherever your access rules live: role/permission tables, JWT claims, a
      * remote service, config, etc.
      */
-    'permission_resolver' => null,
+    'rule_resolver' => null,
 
     /*
      * The Warden schemas registered with the application. Registration is
      * explicit: every schema that governs a resource must be listed here. A
-     * schema that is not listed is unknown to permission validation and lookups.
+     * schema that is not listed is unknown to access checks and lookups.
      */
     'schemas' => [
         // App\Schemas\PostSchema::class,

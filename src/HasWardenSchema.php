@@ -60,7 +60,7 @@ trait HasWardenSchema
         $schema->filterQuery(
             currentUser: $user,
             query: $query->getQuery(),
-            entitySqlId: $model->getQualifiedKeyName(),
+            targetSqlId: $model->getQualifiedKeyName(),
             abilities: $abilities,
             matchMode: $matchMode,
         );
@@ -91,7 +91,7 @@ trait HasWardenSchema
         $schema->selectAbilitiesInQuery(
             currentUser: $user,
             query: $query->getQuery(),
-            entitySqlId: $model->getQualifiedKeyName(),
+            targetSqlId: $model->getQualifiedKeyName(),
             selectedAbilitiesKey: $selectedAbilitiesKey,
             onlyAbilities: $onlyAbilities,
         );

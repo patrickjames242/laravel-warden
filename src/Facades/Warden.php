@@ -7,8 +7,8 @@ use Warden\WardenManager;
 
 /**
  * @method static string getSchemaForModelClass(string $modelClass)
- * @method static string getSchemaForPermissionBaseName(string $permissionBaseName)
- * @method static array getNoTargetAbilitiesBag(\Illuminate\Contracts\Auth\Authenticatable|null $user = null, string ...$schemaClassesOrPermissionBaseNames)
+ * @method static string getSchemaForKey(string $schemaKey)
+ * @method static array getNoTargetAbilitiesBag(\Illuminate\Contracts\Auth\Authenticatable|null $user = null, string ...$schemaClassesOrSchemaKeys)
  * @method static array registeredSchemas()
  *
  * @see \Warden\WardenManager

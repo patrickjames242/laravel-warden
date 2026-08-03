@@ -8,14 +8,14 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Warden\Schema\WardenSchema;
 
-final readonly class PermissionResolutionContext
+final readonly class RuleResolutionContext
 {
     /**
      * @param  class-string<WardenSchema>  $schema
      * @param  class-string<Model>|null  $model
      */
     public function __construct(
-        public string $permissionBaseName,
+        public string $schemaKey,
         public string $schema,
         public ?Authenticatable $user,
         public ?string $model = null,

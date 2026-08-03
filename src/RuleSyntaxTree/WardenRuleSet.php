@@ -10,11 +10,11 @@ readonly class WardenRuleSet
 {
 
     /**
-     * @param string $entityName
+     * @param string $schemaKey
      * @param array<int, WardenRule> $rules
      */
     public function __construct(
-        public string $entityName,
+        public string $schemaKey,
         public array $rules,
     ){
 
@@ -25,11 +25,11 @@ readonly class WardenRuleSet
      * named (:name) or positional (?) placeholders against $bindings.
      */
     public static function fromSyntax(
-        string $entityName,
+        string $schemaKey,
         string $syntax,
         array $bindings = [],
     ): self {
-        return new self($entityName, WardenParser::parse($syntax, $bindings));
+        return new self($schemaKey, WardenParser::parse($syntax, $bindings));
     }
 
     /**
@@ -41,7 +41,7 @@ readonly class WardenRuleSet
      * @param WardenRule|WardenRuleBuilder|array<int, WardenRule|WardenRuleBuilder> ...$rules
      */
     public static function fromRules(
-        string $entityName,
+        string $schemaKey,
         WardenRule|WardenRuleBuilder|array ...$rules,
     ): self {
         $flattened = [];
@@ -62,7 +62,7 @@ readonly class WardenRuleSet
             }
         }
 
-        return new self($entityName, $flattened);
+        return new self($schemaKey, $flattened);
     }
 
     /**
@@ -81,7 +81,7 @@ readonly class WardenRuleSet
      *
      * @param Closure(callable():WardenRuleBuilder):void $callback
      */
-    public static function build(string $entityName, Closure $callback): self
+    public static function build(string $schemaKey, Closure $callback): self
     {
         $builders = [];
 
@@ -91,14 +91,14 @@ readonly class WardenRuleSet
 
         $callback($make);
 
-        return self::fromRules($entityName, $builders);
+        return self::fromRules($schemaKey, $builders);
     }
 
     /**
      * Render every rule back to the string DSL with scalar condition parameters
      * inlined as literals, one blank line between rules. Throws if a parameter
      * has no inline representation — use {@see toBoundSyntax()} for those.
-     * Round-trips via `WardenRuleSet::fromSyntax($this->entityName, $syntax)`.
+     * Round-trips via `WardenRuleSet::fromSyntax($this->schemaKey, $syntax)`.
      */
     public function toSyntax(): string
     {
@@ -109,7 +109,7 @@ readonly class WardenRuleSet
      * Render every rule to `?`-parameterized syntax plus one flat, left-to-right
      * positional bindings list spanning the whole set. Lossless for any value.
      * Round-trips via
-     * `WardenRuleSet::fromSyntax($this->entityName, $result->syntax, $result->bindings)`.
+     * `WardenRuleSet::fromSyntax($this->schemaKey, $result->syntax, $result->bindings)`.
      */
     public function toBoundSyntax(): BoundSyntax
     {

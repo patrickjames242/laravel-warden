@@ -28,7 +28,7 @@ trait ResolvesConditions
         string $conditionKey,
         Authenticatable $currentUser,
         Builder $whereClause,
-        ?string $entitySqlId = null,
+        ?string $targetSqlId = null,
         array $parameters = []
     ): mixed
     {
@@ -42,16 +42,16 @@ trait ResolvesConditions
 
         $methodName = $conditionDefinition['method']->getName();
 
-        if ($conditionDefinition['has_target'] && $entitySqlId === null) {
+        if ($conditionDefinition['has_target'] && $targetSqlId === null) {
             throw new InvalidArgumentException(
-                sprintf('Condition [%s] on schema [%s] requires an entity SQL id.', $conditionKey, static::class)
+                sprintf('Condition [%s] on schema [%s] requires a target SQL id.', $conditionKey, static::class)
             );
         }
 
         $arguments = [$currentUser, $whereClause];
 
         if ($conditionDefinition['has_target']) {
-            $arguments[] = $entitySqlId;
+            $arguments[] = $targetSqlId;
         }
 
         /* Conditions receive their DSL arguments as a trailing bag. Methods that
@@ -64,32 +64,27 @@ trait ResolvesConditions
 
     // -- ConditionResolver ----------------------------------------------------
 
-    public function declaredAbilities(): array
+    public function conditionExists(string $conditionKey): bool
     {
-        return static::getAbilities();
+        return static::conditionDefinitionForKey($conditionKey) !== null;
     }
 
-    public function conditionExists(string $name): bool
+    public function conditionIsTargeted(string $conditionKey): bool
     {
-        return static::conditionDefinitionForKey($name) !== null;
-    }
-
-    public function conditionIsTargeted(string $name): bool
-    {
-        $definition = static::conditionDefinitionForKey($name);
+        $definition = static::conditionDefinitionForKey($conditionKey);
 
         return $definition !== null && $definition['has_target'];
     }
 
     public function applyCondition(
-        string $name,
+        string $conditionKey,
         Authenticatable $user,
         \Illuminate\Database\Query\Builder $whereClause,
-        ?string $entitySqlId,
+        ?string $targetSqlId,
         array $parameters
     ): \Illuminate\Database\Query\Builder|bool
     {
-        return $this->applyConditionFilter($name, $user, $whereClause, $entitySqlId, $parameters);
+        return $this->applyConditionFilter($conditionKey, $user, $whereClause, $targetSqlId, $parameters);
     }
 
     /**

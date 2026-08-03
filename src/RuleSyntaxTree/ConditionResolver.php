@@ -19,18 +19,18 @@ interface ConditionResolver
      *
      * @return array<int, string>
      */
-    public function declaredAbilities(): array;
+    public static function declaredAbilities(): array;
 
     /**
-     * Whether a condition with this name is declared by the schema.
+     * Whether a condition with this key is declared by the schema.
      */
-    public function conditionExists(string $name): bool;
+    public function conditionExists(string $conditionKey): bool;
 
     /**
-     * Whether the named condition is row-targeted (needs an entity SQL id). A
+     * Whether the keyed condition is row-targeted (needs a target SQL id). A
      * targeted condition is forced to false when compiled without a target.
      */
-    public function conditionIsTargeted(string $name): bool;
+    public function conditionIsTargeted(string $conditionKey): bool;
 
     /**
      * Apply a condition's predicate to $whereClause (mutating it) and return the
@@ -40,10 +40,10 @@ interface ConditionResolver
      * @param array<int, mixed> $parameters The resolved DSL arguments.
      */
     public function applyCondition(
-        string $name,
+        string $conditionKey,
         Authenticatable $user,
         Builder $whereClause,
-        ?string $entitySqlId,
+        ?string $targetSqlId,
         array $parameters,
     ): Builder|bool;
 }

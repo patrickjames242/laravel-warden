@@ -16,7 +16,7 @@ use Warden\Schema\Concerns\ResolvesConditions;
  * A Warden schema declares the vocabulary a rule string may reference for one
  * entity: its abilities (`#[Ability]` constants) and its conditions
  * (`#[ConditionWith(out)Target]` methods, which emit SQL). It is NOT where the
- * rules live — those come from the {@see PermissionResolver} as a
+ * rules live — those come from the {@see RuleResolver} as a
  * {@see \Warden\RuleSyntaxTree\WardenRuleSet}, compiled against this schema.
  *
  * The implementation is split across three concerns:
@@ -39,10 +39,10 @@ abstract class WardenSchema implements ConditionResolver
     public const model = '';
 
     /**
-     * Explicit permission base name to override the default base name. When null
-     * the base name is derived from the model table.
+     * Explicit schema key to override the default. When null the schema key is
+     * derived from the model table.
      */
-    public const permissionBaseName = null;
+    public const schemaKey = null;
 
     /**
      * @var array<string, true>
@@ -51,7 +51,7 @@ abstract class WardenSchema implements ConditionResolver
 
     public function __construct()
     {
-        $this->abilityLookup = array_fill_keys(static::getAbilities(), true);
+        $this->abilityLookup = array_fill_keys(static::declaredAbilities(), true);
     }
 
     /**
@@ -98,7 +98,7 @@ abstract class WardenSchema implements ConditionResolver
         $schema = new static;
 
         if ($target === null) {
-            return $schema->getAbilitiesWithoutEntity($user, $abilities, $matchMode) !== [];
+            return $schema->getAbilitiesWithoutTarget($user, $abilities, $matchMode) !== [];
         }
 
         static::assertSupportsTargetedChecks();
@@ -110,7 +110,7 @@ abstract class WardenSchema implements ConditionResolver
         return $schema->filterQuery(
             currentUser: $user,
             query: $model->newQuery()->whereKey($targetId)->getQuery(),
-            entitySqlId: $model->getQualifiedKeyName(),
+            targetSqlId: $model->getQualifiedKeyName(),
             abilities: $abilities,
             matchMode: $matchMode,
         )->exists();
@@ -135,7 +135,7 @@ abstract class WardenSchema implements ConditionResolver
         $schema = new static;
 
         if ($target === null) {
-            return $schema->getAbilitiesWithoutEntity($user);
+            return $schema->getAbilitiesWithoutTarget($user);
         }
 
         static::assertSupportsTargetedChecks();
@@ -153,7 +153,7 @@ abstract class WardenSchema implements ConditionResolver
         $row = (array)$schema->selectAbilitiesInQuery(
             currentUser: $user,
             query: $model->newQuery()->whereKey($targetId)->getQuery(),
-            entitySqlId: $model->getQualifiedKeyName(),
+            targetSqlId: $model->getQualifiedKeyName(),
         )->first();
         $selectedAbilities = $row['abilities'] ?? null;
 
@@ -174,12 +174,12 @@ abstract class WardenSchema implements ConditionResolver
      * Returns the no-target access-control bag using the same nested shape as
      * resource helpers.
      *
-     * @return array<string, array{permission_base_name: string, abilities: array<int, string>, target: null}>
+     * @return array<string, array{schema_key: string, abilities: array<int, string>, target: null}>
      */
     public static function getNoTargetAbilitiesBag(?Authenticatable $user = null): array
     {
         return [
-            'permission_base_name' => static::permissionsBaseName(),
+            'schema_key' => static::schemaKey(),
             'abilities' => static::getUserAbilities(null, $user),
             'target' => null,
         ];

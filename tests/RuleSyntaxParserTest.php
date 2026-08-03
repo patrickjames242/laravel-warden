@@ -17,8 +17,8 @@ it('parses source and bindings into a flat list of rules', function () {
 
     expect($rules)->toBeArray()->toHaveCount(2);
     expect($rules[0])->toBeInstanceOf(WardenRule::class);
-    expect($rules[0]->conditions->conditionName)->toBe('is_teacher');
-    expect($rules[1]->conditions->conditionName)->toBe('is_admin');
+    expect($rules[0]->conditions->conditionKey)->toBe('is_teacher');
+    expect($rules[1]->conditions->conditionKey)->toBe('is_admin');
 });
 
 it('resolves bindings through Parser::parse', function () {
@@ -36,12 +36,12 @@ it('parses a single rule with can and cannot clauses', function () {
         they cannot approve, deny
         DSL);
 
-    expect($set->entityName)->toBe('timesheets');
+    expect($set->schemaKey)->toBe('timesheets');
     expect($set->rules)->toHaveCount(1);
 
     $rule = $set->rules[0];
     expect($rule->conditions)->toBeInstanceOf(ConditionNode::class);
-    expect($rule->conditions->conditionName)->toBe('is_self');
+    expect($rule->conditions->conditionKey)->toBe('is_self');
     expect($rule->canAbilities)->toBe(['edit', 'view', 'delete']);
     expect($rule->cannotAbilities)->toBe(['approve', 'deny']);
 });
@@ -56,8 +56,8 @@ it('parses multiple rules in one string', function () {
         DSL);
 
     expect($set->rules)->toHaveCount(2);
-    expect($set->rules[0]->conditions->conditionName)->toBe('is_self');
-    expect($set->rules[1]->conditions->conditionName)->toBe('has_access_control_level');
+    expect($set->rules[0]->conditions->conditionKey)->toBe('is_self');
+    expect($set->rules[1]->conditions->conditionKey)->toBe('has_access_control_level');
 });
 
 it('parses an unconditional rule (no if) with null conditions', function () {
@@ -87,9 +87,9 @@ it('treats whitespace as insignificant (whole ruleset on one line)', function ()
     );
 
     expect($set->rules)->toHaveCount(2);
-    expect($set->rules[0]->conditions->conditionName)->toBe('is_self');
+    expect($set->rules[0]->conditions->conditionKey)->toBe('is_self');
     expect($set->rules[0]->canAbilities)->toBe(['edit']);
-    expect($set->rules[1]->conditions->conditionName)->toBe('is_manager');
+    expect($set->rules[1]->conditions->conditionKey)->toBe('is_manager');
     expect($set->rules[1]->canAbilities)->toBe(['approve']);
     expect($set->rules[1]->cannotAbilities)->toBe(['delete']);
 });
@@ -103,12 +103,12 @@ it('applies precedence not > and > or', function () {
     $expr = $set->rules[0]->conditions;
     expect($expr)->toBeInstanceOf(OrNode::class);
     expect($expr->leftSide)->toBeInstanceOf(ConditionNode::class);
-    expect($expr->leftSide->conditionName)->toBe('is_self');
+    expect($expr->leftSide->conditionKey)->toBe('is_self');
 
     expect($expr->rightSide)->toBeInstanceOf(AndNode::class);
     expect($expr->rightSide->leftSide)->toBeInstanceOf(NotNode::class);
-    expect($expr->rightSide->leftSide->operand->conditionName)->toBe('is_manager');
-    expect($expr->rightSide->rightSide->conditionName)->toBe('is_owner');
+    expect($expr->rightSide->leftSide->operand->conditionKey)->toBe('is_manager');
+    expect($expr->rightSide->rightSide->conditionKey)->toBe('is_owner');
 });
 
 it('treats ! as a synonym for not', function () {
@@ -195,7 +195,7 @@ it('parses wildcard abilities on can and cannot', function () {
 it('allows dashes inside condition and ability names', function () {
     $set = WardenRuleSet::fromSyntax('timesheets', 'if is-department-manager they can soft-delete');
 
-    expect($set->rules[0]->conditions->conditionName)->toBe('is-department-manager');
+    expect($set->rules[0]->conditions->conditionKey)->toBe('is-department-manager');
     expect($set->rules[0]->canAbilities)->toBe(['soft-delete']);
 });
 

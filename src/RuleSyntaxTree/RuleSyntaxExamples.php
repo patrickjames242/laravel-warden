@@ -154,23 +154,23 @@ class RuleSyntaxExamples
      * bag (the resolved ConditionNode::$parameters). The condition indexes it and
      * is responsible for binding every value as a placeholder — never
      * interpolating it into SQL. The bag is always the last argument, after the
-     * entity SQL id for targeted conditions:
+     * target SQL id for targeted conditions:
      *
      *   use Illuminate\Contracts\Auth\Authenticatable;
      *   use Illuminate\Contracts\Database\Query\Builder;
      *   use Warden\ConditionWithTarget;
      *   use Warden\ConditionWithoutTarget;
      *
-     *   // Targeted: (user, whereClause, entitySqlId, parameters)
+     *   // Targeted: (user, whereClause, targetSqlId, parameters)
      *   #[ConditionWithTarget]
      *   public function conditionIsSpecificUser(
      *       Authenticatable $user,
      *       Builder $where,
-     *       string $entitySqlId,
+     *       string $targetSqlId,
      *       array $parameters,
      *   ): Builder {
      *       // is_specific_user('some-user-id') -> $parameters[0] === 'some-user-id'
-     *       return $where->whereRaw("{$entitySqlId} = ?", [$parameters[0]]);
+     *       return $where->whereRaw("{$targetSqlId} = ?", [$parameters[0]]);
      *   }
      *
      *   // Variadic / list argument -> a whereIn:
@@ -178,11 +178,11 @@ class RuleSyntaxExamples
      *   public function conditionIsDepartment(
      *       Authenticatable $user,
      *       Builder $where,
-     *       string $entitySqlId,
+     *       string $targetSqlId,
      *       array $parameters,
      *   ): Builder {
      *       // is_department(?, ?, ?) with positional bindings ['a', 'b', 'c']
-     *       return $where->whereIn($entitySqlId, $parameters);
+     *       return $where->whereIn($targetSqlId, $parameters);
      *   }
      *
      *   // No-target boolean condition: (user, ...) returning true/false.

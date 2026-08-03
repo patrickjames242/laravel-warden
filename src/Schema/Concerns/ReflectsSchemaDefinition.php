@@ -20,15 +20,16 @@ use Warden\ConditionWithTarget;
 trait ReflectsSchemaDefinition
 {
     /**
-     * Returns the permission namespace prefix for this schema.
+     * Returns the schema key for this schema — the namespace prefix used in
+     * rules and lookups.
      *
      * The value is derived from the table name of the model referenced by `static::model`.
-     * That makes the prefix deterministic and keeps permission strings aligned with the
+     * That makes the prefix deterministic and keeps rules aligned with the
      * managed entity in storage.
      *
      * Example:
      * ```php
-     * CourseSectionSchema::permissionsBaseName();
+     * CourseSectionSchema::schemaKey();
      * ```
      *
      * Expected output:
@@ -36,10 +37,10 @@ trait ReflectsSchemaDefinition
      * 'course_sections'
      * ```
      */
-    public static function permissionsBaseName(): string
+    public static function schemaKey(): string
     {
-        if (static::permissionBaseName !== null) {
-            return static::permissionBaseName;
+        if (static::schemaKey !== null) {
+            return static::schemaKey;
         }
 
         $modelClass = static::model;
@@ -113,7 +114,7 @@ trait ReflectsSchemaDefinition
      *
      * @return array<int, string>
      */
-    public static function getAbilities(): array
+    public static function declaredAbilities(): array
     {
         return collect(static::abilityDefinitions())
             ->pluck('value')
@@ -140,15 +141,15 @@ trait ReflectsSchemaDefinition
 
     protected static function conditionKeyFromMethodName(string $methodName): ?string
     {
-        $conditionName = str_starts_with($methodName, 'condition')
+        $conditionKey = str_starts_with($methodName, 'condition')
             ? Str::after($methodName, 'condition')
             : $methodName;
 
-        if ($conditionName === '') {
+        if ($conditionKey === '') {
             return null;
         }
 
-        return Str::snake($conditionName);
+        return Str::snake($conditionKey);
     }
 
     /**
@@ -205,18 +206,18 @@ trait ReflectsSchemaDefinition
 
                 if ($hasTarget && $parameterCount < 3) {
                     throw new InvalidArgumentException(sprintf(
-                        'Condition method [%s::%s] must accept an entity SQL id parameter when marked #[ConditionWithTarget].',
+                        'Condition method [%s::%s] must accept a target SQL id parameter when marked #[ConditionWithTarget].',
                         static::class,
                         $method->getName()
                     ));
                 }
 
                 /* No-target conditions accept at most (user, whereClause,
-                   parameters). A fourth parameter means the author is expecting an
-                   entity SQL id they will never receive. */
+                   parameters). A fourth parameter means the author is expecting a
+                   target SQL id they will never receive. */
                 if (!$hasTarget && $parameterCount > 3) {
                     throw new InvalidArgumentException(sprintf(
-                        'Condition method [%s::%s] must not accept an entity SQL id parameter when marked #[ConditionWithoutTarget].',
+                        'Condition method [%s::%s] must not accept a target SQL id parameter when marked #[ConditionWithoutTarget].',
                         static::class,
                         $method->getName()
                     ));

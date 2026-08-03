@@ -30,13 +30,13 @@ final class BuilderTestUser implements Authenticatable
 
 final class BuilderFakeResolver implements ConditionResolver
 {
-    public function declaredAbilities(): array { return ['view']; }
+    public static function declaredAbilities(): array { return ['view']; }
     public function conditionExists(string $name): bool { return $name === 'is_teacher'; }
     public function conditionIsTargeted(string $name): bool { return true; }
 
-    public function applyCondition(string $name, Authenticatable $user, Builder $whereClause, ?string $entitySqlId, array $parameters): Builder|bool
+    public function applyCondition(string $name, Authenticatable $user, Builder $whereClause, ?string $targetSqlId, array $parameters): Builder|bool
     {
-        return $whereClause->whereRaw("{$entitySqlId} = ?", ["teacher:{$user->role}"]);
+        return $whereClause->whereRaw("{$targetSqlId} = ?", ["teacher:{$user->role}"]);
     }
 }
 
@@ -48,7 +48,7 @@ function treeToString(?object $node): string
 {
     return match (true) {
         $node === null => 'null',
-        $node instanceof ConditionNode => $node->conditionName . ($node->parameters === []
+        $node instanceof ConditionNode => $node->conditionKey . ($node->parameters === []
             ? ''
             : '(' . implode(',', array_map(fn ($p) => var_export($p, true), $node->parameters)) . ')'),
         $node instanceof NotNode => '!' . treeToString($node->operand),
@@ -73,7 +73,7 @@ it('carries condition parameters onto the node', function () {
     $rule = WardenRule::build()->if('in_department', ['sales', 'eng'])->theyCan('view')->toRule();
 
     expect($rule->conditions)->toBeInstanceOf(ConditionNode::class);
-    expect($rule->conditions->conditionName)->toBe('in_department');
+    expect($rule->conditions->conditionKey)->toBe('in_department');
     expect($rule->conditions->parameters)->toBe(['sales', 'eng']);
 });
 
@@ -81,7 +81,7 @@ it('wraps negated terms in a NotNode', function () {
     $rule = WardenRule::build()->ifNot('is_locked')->theyCan('view')->toRule();
 
     expect($rule->conditions)->toBeInstanceOf(NotNode::class);
-    expect($rule->conditions->operand->conditionName)->toBe('is_locked');
+    expect($rule->conditions->operand->conditionKey)->toBe('is_locked');
 });
 
 it('rejects a rule with no they-can/they-cannot clause, matching the DSL', function () {
@@ -216,7 +216,7 @@ it('accepts builders directly in fromRules', function () {
     );
 
     expect($set->rules)->toHaveCount(2);
-    expect($set->rules[0]->conditions->conditionName)->toBe('is_self');
+    expect($set->rules[0]->conditions->conditionKey)->toBe('is_self');
     expect($set->rules[1]->conditions)->toBeNull();
 });
 
@@ -228,9 +228,9 @@ it('builds a rule set with one rule per $rule() call, no toRule() needed', funct
         $rule()->theyCan('list');
     });
 
-    expect($set->entityName)->toBe('timesheets');
+    expect($set->schemaKey)->toBe('timesheets');
     expect($set->rules)->toHaveCount(2);
-    expect($set->rules[0]->conditions->conditionName)->toBe('is_self');
+    expect($set->rules[0]->conditions->conditionKey)->toBe('is_self');
     expect($set->rules[0]->canAbilities)->toBe(['edit', 'view']);
     expect($set->rules[1]->conditions)->toBeNull();
     expect($set->rules[1]->canAbilities)->toBe(['list']);

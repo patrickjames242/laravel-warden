@@ -35,7 +35,7 @@ final class FakeConditionResolver implements ConditionResolver
 {
     private const TARGETED = ['is_teacher' => true, 'is_owner' => true, 'is_admin' => false];
 
-    public function declaredAbilities(): array
+    public static function declaredAbilities(): array
     {
         return ['view', 'edit', 'delete', 'publish'];
     }
@@ -50,11 +50,11 @@ final class FakeConditionResolver implements ConditionResolver
         return self::TARGETED[$name] ?? false;
     }
 
-    public function applyCondition(string $name, Authenticatable $user, Builder $whereClause, ?string $entitySqlId, array $parameters): Builder|bool
+    public function applyCondition(string $name, Authenticatable $user, Builder $whereClause, ?string $targetSqlId, array $parameters): Builder|bool
     {
         return match ($name) {
-            'is_teacher' => $whereClause->whereRaw("{$entitySqlId} = ?", ["teacher:{$user->role}"]),
-            'is_owner' => $whereClause->whereRaw("{$entitySqlId} = ?", [$parameters[0]]),
+            'is_teacher' => $whereClause->whereRaw("{$targetSqlId} = ?", ["teacher:{$user->role}"]),
+            'is_owner' => $whereClause->whereRaw("{$targetSqlId} = ?", [$parameters[0]]),
             'is_admin' => $user->role === 'admin',
             default => throw new RuntimeException("unknown condition {$name}"),
         };
@@ -148,7 +148,7 @@ it('forces a targeted condition to false with no target, true under not', functi
     $compiler = new RuleSetCompiler(new FakeConditionResolver);
     $user = new CompilerTestUser('role-1');
 
-    // No entitySqlId: is_teacher is forced false.
+    // No targetSqlId: is_teacher is forced false.
     $granted = WardenRuleSet::fromSyntax('docs', 'if is_teacher they can view');
     $q = DB::table('docs');
     $q->addNestedWhereQuery($compiler->compileAbility($user, $q, 'view', $granted, null));

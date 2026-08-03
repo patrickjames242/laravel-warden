@@ -8,7 +8,7 @@ namespace Warden\RuleSyntaxTree;
  * left-to-right list of values that fill them.
  *
  * Round-trips through the parser: for a rule set,
- * `WardenRuleSet::fromSyntax($entityName, $syntax, $bindings)` reconstructs an
+ * `WardenRuleSet::fromSyntax($schemaKey, $syntax, $bindings)` reconstructs an
  * equivalent set; for a single rule, `WardenRule::fromSyntax($syntax, $bindings)`.
  */
 readonly class BoundSyntax

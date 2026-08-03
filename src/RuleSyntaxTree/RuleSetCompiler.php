@@ -64,7 +64,7 @@ final class RuleSetCompiler
         Builder $query,
         string $ability,
         WardenRuleSet $ruleSet,
-        ?string $entitySqlId = null,
+        ?string $targetSqlId = null,
     ): Builder {
         $predicate = $query->newQuery();
 
@@ -96,7 +96,7 @@ final class RuleSetCompiler
         }
 
         // Grant side: OR of every can-expression (null => always-true term).
-        $predicate->where(function (Builder $grantGroup) use ($grants, $user, $entitySqlId): void {
+        $predicate->where(function (Builder $grantGroup) use ($grants, $user, $targetSqlId): void {
             foreach ($grants as $index => $grantExpression) {
                 $boolean = $index === 0 ? 'and' : 'or';
 
@@ -106,14 +106,14 @@ final class RuleSetCompiler
                     continue;
                 }
 
-                $this->applyExpression($grantGroup, $grantExpression, $user, $entitySqlId, $boolean, false);
+                $this->applyExpression($grantGroup, $grantExpression, $user, $targetSqlId, $boolean, false);
             }
         });
 
         // Deny side: AND NOT(expression) for each conditional `cannot`.
         foreach ($denies as $denyExpression) {
-            $predicate->where(function (Builder $denyGroup) use ($denyExpression, $user, $entitySqlId): void {
-                $this->applyExpression($denyGroup, $denyExpression, $user, $entitySqlId, 'and', true);
+            $predicate->where(function (Builder $denyGroup) use ($denyExpression, $user, $targetSqlId): void {
+                $this->applyExpression($denyGroup, $denyExpression, $user, $targetSqlId, 'and', true);
             });
         }
 
@@ -135,9 +135,9 @@ final class RuleSetCompiler
 
     private function assertConditionExists(ConditionNode $node): void
     {
-        if (! $this->conditions->conditionExists($node->conditionName)) {
+        if (! $this->conditions->conditionExists($node->conditionKey)) {
             throw new InvalidArgumentException(
-                sprintf('Condition [%s] is not declared by the schema.', $node->conditionName)
+                sprintf('Condition [%s] is not declared by the schema.', $node->conditionKey)
             );
         }
     }
@@ -159,12 +159,12 @@ final class RuleSetCompiler
         Builder $parent,
         IBooleanExpressionNode $node,
         Authenticatable $user,
-        ?string $entitySqlId,
+        ?string $targetSqlId,
         string $boolean,
         bool $negate,
     ): void {
         if ($node instanceof NotNode) {
-            $this->applyExpression($parent, $node->operand, $user, $entitySqlId, $boolean, ! $negate);
+            $this->applyExpression($parent, $node->operand, $user, $targetSqlId, $boolean, ! $negate);
 
             return;
         }
@@ -174,16 +174,16 @@ final class RuleSetCompiler
             $childrenAreOr = $node instanceof OrNode;
             $innerSecondBoolean = ($childrenAreOr xor $negate) ? 'or' : 'and';
 
-            $parent->where(function (Builder $group) use ($node, $user, $entitySqlId, $negate, $innerSecondBoolean): void {
-                $this->applyExpression($group, $node->leftSide, $user, $entitySqlId, 'and', $negate);
-                $this->applyExpression($group, $node->rightSide, $user, $entitySqlId, $innerSecondBoolean, $negate);
+            $parent->where(function (Builder $group) use ($node, $user, $targetSqlId, $negate, $innerSecondBoolean): void {
+                $this->applyExpression($group, $node->leftSide, $user, $targetSqlId, 'and', $negate);
+                $this->applyExpression($group, $node->rightSide, $user, $targetSqlId, $innerSecondBoolean, $negate);
             }, null, null, $boolean);
 
             return;
         }
 
         if ($node instanceof ConditionNode) {
-            $this->applyCondition($parent, $node, $user, $entitySqlId, $boolean, $negate);
+            $this->applyCondition($parent, $node, $user, $targetSqlId, $boolean, $negate);
 
             return;
         }
@@ -202,13 +202,13 @@ final class RuleSetCompiler
         Builder $parent,
         ConditionNode $node,
         Authenticatable $user,
-        ?string $entitySqlId,
+        ?string $targetSqlId,
         string $boolean,
         bool $negate,
     ): void {
         // A targeted condition cannot be evaluated without a row; force it false
         // (so `not <targeted>` becomes true) in a no-target compile.
-        if ($entitySqlId === null && $this->conditions->conditionIsTargeted($node->conditionName)) {
+        if ($targetSqlId === null && $this->conditions->conditionIsTargeted($node->conditionKey)) {
             $parent->whereRaw($negate ? '1 = 1' : '1 = 0', [], $boolean);
 
             return;
@@ -221,10 +221,10 @@ final class RuleSetCompiler
         );
 
         $result = $this->conditions->applyCondition(
-            $node->conditionName,
+            $node->conditionKey,
             $user,
             $existsQuery,
-            $entitySqlId,
+            $targetSqlId,
             $node->parameters,
         );
 

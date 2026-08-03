@@ -6,7 +6,7 @@ readonly class ConditionNode implements IBooleanExpressionNode
 {
 
     public function __construct(
-        public string $conditionName,
+        public string $conditionKey,
         public array $parameters = [],
     ){
 

@@ -6,8 +6,8 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Database\Query\Builder;
 use RuntimeException;
 use Warden\AbilityMatchMode;
-use Warden\PermissionResolutionContext;
-use Warden\PermissionResolver;
+use Warden\RuleResolutionContext;
+use Warden\RuleResolver;
 use Warden\RuleSyntaxTree\RuleSetCompiler;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 
@@ -27,7 +27,7 @@ trait BuildsAccessQueries
     public function filterQuery(
         Authenticatable $currentUser,
         Builder $query,
-        string $entitySqlId,
+        string $targetSqlId,
         string|array $abilities,
         AbilityMatchMode $matchMode = AbilityMatchMode::ALL
     ): Builder
@@ -45,14 +45,14 @@ trait BuildsAccessQueries
             $matchMode,
             $currentUser,
             $query,
-            $entitySqlId,
+            $targetSqlId,
             $ruleSet,
         ) {
             foreach ($abilities as $ability) {
                 $abilityConditionQuery = $this->buildAbilityConditionQuery(
                     currentUser: $currentUser,
                     query: $query,
-                    entitySqlId: $entitySqlId,
+                    targetSqlId: $targetSqlId,
                     ability: $ability,
                     ruleSet: $ruleSet,
                 );
@@ -83,7 +83,7 @@ trait BuildsAccessQueries
     public function selectAbilitiesInQuery(
         Authenticatable $currentUser,
         Builder $query,
-        string $entitySqlId,
+        string $targetSqlId,
         string $selectedAbilitiesKey = 'abilities',
         ?array $onlyAbilities = null
     ): Builder
@@ -93,7 +93,7 @@ trait BuildsAccessQueries
         }
 
         $abilities = $onlyAbilities === null
-            ? static::getAbilities()
+            ? static::declaredAbilities()
             : static::normalizeAbilities($onlyAbilities);
 
         if ($abilities === []) {
@@ -104,7 +104,7 @@ trait BuildsAccessQueries
             currentUser: $currentUser,
             query: $query,
             abilities: $abilities,
-            entitySqlId: $entitySqlId
+            targetSqlId: $targetSqlId
         );
 
         /* The JSON aggregate function differs per driver; default to an empty
@@ -133,30 +133,30 @@ trait BuildsAccessQueries
     }
 
     /**
-     * Returns the abilities the current user can perform without an entity target.
+     * Returns the abilities the current user can perform without a target.
      *
-     * The evaluation uses only conditions that do not require an entity SQL id
+     * The evaluation uses only conditions that do not require a target SQL id
      * (targeted conditions are forced false). When abilities are provided
      * explicitly, `AbilityMatchMode::ALL` returns an empty array unless every
      * requested ability matches in that context.
      *
      * @return array<int, string>
      */
-    public function getAbilitiesWithoutEntity(
+    public function getAbilitiesWithoutTarget(
         Authenticatable $currentUser,
         string|array|null $abilities = null,
         AbilityMatchMode $matchMode = AbilityMatchMode::ANY
     ): array
     {
         $requestedAbilities = $abilities === null
-            ? static::getAbilities()
+            ? static::declaredAbilities()
             : $this->normalizeAbilities($abilities);
 
         if ($requestedAbilities === []) {
             return [];
         }
 
-        /* A connection to evaluate the ability predicates on (permission lookup
+        /* A connection to evaluate the ability predicates on (rule-set lookup
            itself is the resolver's job, on its own connection). No-target
            conditions may reference tenant tables, so a capability schema uses
            the default connection — the current tenant under tenancy. */
@@ -191,10 +191,10 @@ trait BuildsAccessQueries
      */
     protected function resolveRuleSet(Authenticatable $currentUser): WardenRuleSet
     {
-        $resolver = app(PermissionResolver::class);
+        $resolver = app(RuleResolver::class);
 
-        $ruleSet = $resolver->resolve(new PermissionResolutionContext(
-            permissionBaseName: static::permissionsBaseName(),
+        $ruleSet = $resolver->resolve(new RuleResolutionContext(
+            schemaKey: static::schemaKey(),
             schema: static::class,
             user: $currentUser,
             model: static::model !== '' ? static::model : null,
@@ -203,7 +203,7 @@ trait BuildsAccessQueries
         $implicitRules = $this->implicitRules();
 
         if ($implicitRules !== []) {
-            $ruleSet = new WardenRuleSet($ruleSet->entityName, [
+            $ruleSet = new WardenRuleSet($ruleSet->schemaKey, [
                 ...$implicitRules,
                 ...$ruleSet->rules,
             ]);
@@ -226,7 +226,7 @@ trait BuildsAccessQueries
         Authenticatable $currentUser,
         Builder $query,
         array $abilities,
-        ?string $entitySqlId = null
+        ?string $targetSqlId = null
     ): Builder
     {
         $abilitySelectQuery = null;
@@ -239,7 +239,7 @@ trait BuildsAccessQueries
             $abilityConditionQuery = $this->buildAbilityConditionQuery(
                 currentUser: $currentUser,
                 query: $query,
-                entitySqlId: $entitySqlId,
+                targetSqlId: $targetSqlId,
                 ability: $ability,
                 ruleSet: $ruleSet,
             );
@@ -264,7 +264,7 @@ trait BuildsAccessQueries
         Builder $query,
         string $ability,
         WardenRuleSet $ruleSet,
-        ?string $entitySqlId = null
+        ?string $targetSqlId = null
     ): Builder
     {
         return $this->compiler()->compileAbility(
@@ -272,7 +272,7 @@ trait BuildsAccessQueries
             $query,
             $ability,
             $ruleSet,
-            $entitySqlId,
+            $targetSqlId,
         );
     }
 }
