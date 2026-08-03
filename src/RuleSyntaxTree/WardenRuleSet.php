@@ -2,6 +2,7 @@
 
 namespace Warden\RuleSyntaxTree;
 
+use Closure;
 use InvalidArgumentException;
 use Warden\RuleSyntaxTree\Parsing\WardenParser;
 
@@ -62,6 +63,35 @@ readonly class WardenRuleSet
         }
 
         return new self($entityName, $flattened);
+    }
+
+    /**
+     * Build a rule set with a callback, one rule per `$rule()` call.
+     *
+     * The callback receives a factory; each invocation of it appends a fresh
+     * {@see WardenRuleBuilder} to the set and returns it for chaining. Rules are
+     * finalized automatically — there is no need to call toRule().
+     *
+     * ```php
+     * WardenRuleSet::build('timesheets', function ($rule) {
+     *     $rule()->if('is_self')->theyCan('edit', 'view');
+     *     $rule()->theyCan('list');
+     * });
+     * ```
+     *
+     * @param Closure(callable():WardenRuleBuilder):void $callback
+     */
+    public static function build(string $entityName, Closure $callback): self
+    {
+        $builders = [];
+
+        $make = function () use (&$builders): WardenRuleBuilder {
+            return $builders[] = new WardenRuleBuilder;
+        };
+
+        $callback($make);
+
+        return self::fromRules($entityName, $builders);
     }
 
 }

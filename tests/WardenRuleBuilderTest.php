@@ -138,17 +138,17 @@ it('negates a whole group', function () {
 
 // -- parity with the string DSL -----------------------------------------------
 
-it('produces the identical tree to the equivalent DSL expression', function (string $dsl, Closure $build) {
+it('produces the identical tree to the equivalent DSL expression', function (string $dsl, Closure $rule) {
     $fromDsl = WardenParser::parseConditionExpression($dsl);
-    $fromBuilder = $build()(WardenRule::build())->toRule()->conditions;
+    $fromBuilder = $rule()->toRule()->conditions;
 
     expect(treeToString($fromBuilder))->toBe(treeToString($fromDsl));
 })->with([
-    'and/or precedence' => ['a and b or c', fn () => fn ($r) => $r->if('a')->andIf('b')->orIf('c')->theyCan('x')],
-    'or/and precedence' => ['a or b and c', fn () => fn ($r) => $r->if('a')->orIf('b')->andIf('c')->theyCan('x')],
-    'explicit grouping'  => ['(a or b) and c', fn () => fn ($r) => $r->if(fn ($g) => $g->if('a')->orIf('b'))->andIf('c')->theyCan('x')],
-    'leading not'        => ['not a and b', fn () => fn ($r) => $r->ifNot('a')->andIf('b')->theyCan('x')],
-    'or not group'       => ['a or not (b and c)', fn () => fn ($r) => $r->if('a')->orIfNot(fn ($g) => $g->if('b')->andIf('c'))->theyCan('x')],
+    'and/or precedence' => ['a and b or c', fn () => WardenRule::build()->if('a')->andIf('b')->orIf('c')->theyCan('x')],
+    'or/and precedence' => ['a or b and c', fn () => WardenRule::build()->if('a')->orIf('b')->andIf('c')->theyCan('x')],
+    'explicit grouping'  => ['(a or b) and c', fn () => WardenRule::build()->if(fn ($g) => $g->if('a')->orIf('b'))->andIf('c')->theyCan('x')],
+    'leading not'        => ['not a and b', fn () => WardenRule::build()->ifNot('a')->andIf('b')->theyCan('x')],
+    'or not group'       => ['a or not (b and c)', fn () => WardenRule::build()->if('a')->orIfNot(fn ($g) => $g->if('b')->andIf('c'))->theyCan('x')],
 ]);
 
 // -- when() -------------------------------------------------------------------
@@ -218,6 +218,34 @@ it('accepts builders directly in fromRules', function () {
     expect($set->rules)->toHaveCount(2);
     expect($set->rules[0]->conditions->conditionName)->toBe('is_self');
     expect($set->rules[1]->conditions)->toBeNull();
+});
+
+// -- WardenRuleSet::build (callback, one rule per $rule() call) ----------------
+
+it('builds a rule set with one rule per $rule() call, no toRule() needed', function () {
+    $set = WardenRuleSet::build('timesheets', function ($rule) {
+        $rule()->if('is_self')->theyCan('edit', 'view');
+        $rule()->theyCan('list');
+    });
+
+    expect($set->entityName)->toBe('timesheets');
+    expect($set->rules)->toHaveCount(2);
+    expect($set->rules[0]->conditions->conditionName)->toBe('is_self');
+    expect($set->rules[0]->canAbilities)->toBe(['edit', 'view']);
+    expect($set->rules[1]->conditions)->toBeNull();
+    expect($set->rules[1]->canAbilities)->toBe(['list']);
+});
+
+it('produces an empty rule set when the callback adds nothing', function () {
+    $set = WardenRuleSet::build('timesheets', function ($rule) {});
+
+    expect($set->rules)->toBe([]);
+});
+
+it('rejects a $rule() with no they-can/they-cannot clause', function () {
+    expect(fn () => WardenRuleSet::build('timesheets', function ($rule) {
+        $rule()->if('is_self');
+    }))->toThrow(LogicException::class);
 });
 
 // -- end-to-end compilation (reuses the compiler test fakes) ------------------
