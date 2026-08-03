@@ -79,6 +79,22 @@ final class WardenParser
     }
 
     /**
+     * Parse a single boolean condition expression (the part after `if`), for the
+     * fluent builder's `ifRaw()` bridge. No `they can/cannot` clauses.
+     *
+     * @param array<int|string, mixed> $bindings
+     */
+    public static function parseConditionExpression(string $source, array $bindings = []): IBooleanExpressionNode
+    {
+        $parser = new self($source, $bindings);
+        $expression = $parser->parseExpression();
+        $parser->expect(TokenType::EOF, 'Unexpected token; expected end of input.');
+        $parser->bindings->finalize($parser->peek());
+
+        return $expression;
+    }
+
+    /**
      * Parse the full input to rules, asserting a clean end and that every
      * binding was consumed.
      *

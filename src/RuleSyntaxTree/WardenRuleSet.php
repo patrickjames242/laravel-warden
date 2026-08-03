@@ -32,23 +32,28 @@ readonly class WardenRuleSet
     }
 
     /**
-     * Build a rule set from already-resolved rules. Accepts either a
-     * variadic list of rules or a single array of rules. Does not accept
-     * bindings, and does not allow mixing raw syntax with resolved rules.
+     * Build a rule set from already-resolved rules. Accepts a variadic list or a
+     * single array, and each element may be a WardenRule or a WardenRuleBuilder
+     * (which is finalized via toRule()). Does not accept bindings, and does not
+     * allow mixing raw syntax with resolved rules.
      *
-     * @param WardenRule|array<int, WardenRule> ...$rules
+     * @param WardenRule|WardenRuleBuilder|array<int, WardenRule|WardenRuleBuilder> ...$rules
      */
     public static function fromRules(
         string $entityName,
-        WardenRule|array ...$rules,
+        WardenRule|WardenRuleBuilder|array ...$rules,
     ): self {
         $flattened = [];
 
         foreach ($rules as $rule) {
             foreach (is_array($rule) ? $rule : [$rule] as $one) {
+                if ($one instanceof WardenRuleBuilder) {
+                    $one = $one->toRule();
+                }
+
                 if (! $one instanceof WardenRule) {
                     throw new InvalidArgumentException(
-                        sprintf('fromRules expects WardenRule instances, got %s.', get_debug_type($one))
+                        sprintf('fromRules expects WardenRule or WardenRuleBuilder instances, got %s.', get_debug_type($one))
                     );
                 }
 

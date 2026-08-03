@@ -188,6 +188,13 @@ final class RuleSetCompiler
             return;
         }
 
+        if ($node instanceof BooleanNode) {
+            $value = $negate ? ! $node->value : $node->value;
+            $parent->whereRaw($value ? '1 = 1' : '1 = 0', [], $boolean);
+
+            return;
+        }
+
         throw new InvalidArgumentException(sprintf('Unsupported expression node [%s].', $node::class));
     }
 

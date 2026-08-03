@@ -41,6 +41,7 @@ full detail, and exactly how you hand rules to the library.
 - [Providing rules to Warden](#providing-rules-to-warden)
   - [The `PermissionResolver`](#the-permissionresolver)
   - [Building a rule set](#building-a-rule-set)
+  - [Building rules programmatically](#building-rules-programmatically)
   - [Implicit rules](#implicit-rules)
   - [Registering the resolver](#registering-the-resolver)
 - [Checking access](#checking-access)
@@ -726,6 +727,100 @@ $rules = WardenParser::parse('if is_self they can view', $bindings = []); // War
 $one   = WardenParser::parseSingleRule('they cannot delete');            // WardenRule
 ```
 
+### Building rules programmatically
+
+When a rule's shape depends on runtime data — a list of department ids, a
+feature flag, values that don't belong in a string — a fluent builder is often
+clearer than assembling DSL text. `WardenRule::build()` returns a builder that
+produces the **same AST** the parser does, so a built rule flows through the
+identical validation and compilation. Nothing is ever serialized to a string,
+so arbitrary PHP values in condition parameters survive untouched.
+
+```php
+use Warden\RuleSyntaxTree\WardenRule;
+
+$rule = WardenRule::build()
+    ->if('is_self')
+    ->orIf(fn ($c) => $c->if('is_manager')->andIf('in_region'))
+    ->theyCan('view', 'update')
+    ->theyCannot('delete')
+    ->toRule();
+```
+
+That builds the same rule as:
+
+```
+if is_self or (is_manager and in_region) they can view, update; they cannot delete
+```
+
+**Conditions.** Each connective has a plain and a negated form, mirroring
+Laravel's `where`/`orWhere`/`whereNot`:
+
+| Method | DSL equivalent |
+| --- | --- |
+| `if` / `andIf` | `and` (both are aliases; the first term's connective is ignored) |
+| `orIf` | `or` |
+| `ifNot` / `andIfNot` | `and not` |
+| `orIfNot` | `or not` |
+
+Each takes a condition name (with optional parameters) **or** a closure:
+
+```php
+->if('in_department', ['sales', 'eng'])   // condition with parameters
+->orIf(fn ($c) => $c->if('a')->orIf('b')) // closure = a parenthesized group
+```
+
+A **closure is a parenthesized group**. It receives a bare condition builder —
+it has the `if`/`orIf`/… methods but no `theyCan`/`theyCannot`, because a group
+is only ever a condition, never a whole rule.
+
+**Clauses.** `theyCan(...$abilities)` and `theyCannot(...$abilities)` are
+variadic and additive. A rule needs at least one clause: `toRule()` throws if
+you call neither, exactly as the DSL rejects a bare `if` with no `they can` /
+`they cannot` line.
+
+**Precedence is identical to the DSL** — `not` > `and` > `or` — so the two
+front-ends produce byte-for-byte identical trees. `->if('a')->andIf('b')->orIf('c')`
+is `(a and b) or c`, not `a and (b or c)`.
+
+**Composing dynamically.** The builder shines when the tree is data-driven.
+Fold a list inside a group, or branch with `when()`:
+
+```php
+$rule = WardenRule::build()
+    ->if('is_self')
+    ->orIf(function ($c) use ($departmentIds) {
+        foreach ($departmentIds as $id) {
+            $c->orIf('in_department', [$id]);
+        }
+    })
+    ->when($includeManagers, fn ($c) => $c->orIf('is_manager'))
+    ->theyCan('view')
+    ->toRule();
+```
+
+An empty group folds to `false`, so it contributes nothing to an `or` and vetoes
+an `and` — folding an empty list is a safe no-op.
+
+**Splicing in DSL text.** `ifRaw()` / `orIfRaw()` parse a DSL fragment and splice
+it in as one group — author the readable part as text, compose the rest
+structurally:
+
+```php
+->ifRaw('is_admin or is_owner', $bindings = [])->andIf('in_region')
+```
+
+**Dropping into a rule set.** `fromRules` accepts builders directly (it finalizes
+each via `toRule()`), so you don't have to call `toRule()` yourself:
+
+```php
+WardenRuleSet::fromRules(
+    'timesheets',
+    WardenRule::build()->if('is_self')->theyCan('view', 'update'),
+    WardenRule::build()->theyCannot('delete'),
+);
+```
+
 ### Implicit rules
 
 A schema can declare rules that are **always in force**, regardless of what the
@@ -979,10 +1074,11 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 
 **Build rules**
 - `WardenRuleSet::fromSyntax(string $entity, string $syntax, array $bindings = [])`
-- `WardenRuleSet::fromRules(string $entity, WardenRule|array ...$rules)`
+- `WardenRuleSet::fromRules(string $entity, WardenRule|WardenRuleBuilder|array ...$rules)`
 - `WardenRule::fromSyntax(string $syntax, array $bindings = [])`
 - `WardenParser::parse(string $source, array $bindings = []): WardenRule[]`
 - `WardenParser::parseSingleRule(string $source, array $bindings = []): WardenRule`
+- `WardenRule::build()` — fluent builder: `->if/andIf/orIf/ifNot/…`, `->theyCan/theyCannot`, `->toRule()`
 
 **Provide rules** — implement `Warden\PermissionResolver`
 - `resolve(PermissionResolutionContext $context): WardenRuleSet`
