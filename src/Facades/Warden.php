@@ -8,6 +8,7 @@ use Warden\WardenManager;
 /**
  * @method static string getSchemaForModelClass(string $modelClass)
  * @method static string getSchemaForKey(string $schemaKey)
+ * @method static string resolveSchemaKey(\Illuminate\Database\Eloquent\Model|\Warden\Schema\WardenSchema|string $schema)
  * @method static array getNoTargetAbilitiesBag(\Illuminate\Contracts\Auth\Authenticatable|null $user = null, string ...$schemaClassesOrSchemaKeys)
  * @method static array registeredSchemas()
  *

@@ -85,6 +85,34 @@ class WardenManager
     }
 
     /**
+     * Normalize any of the accepted schema references to a schema key.
+     *
+     * Accepts a schema key string, a {@see WardenSchema} instance or class-string,
+     * or a {@see Model} instance or class-string. A plain string that matches
+     * neither a schema class nor a model class is treated as a literal schema key.
+     */
+    public function resolveSchemaKey(Model|WardenSchema|string $schema): string
+    {
+        if ($schema instanceof WardenSchema) {
+            return $schema::schemaKey();
+        }
+
+        if ($schema instanceof Model) {
+            return $this->getSchemaForModelClass($schema::class)::schemaKey();
+        }
+
+        if (is_a($schema, WardenSchema::class, true)) {
+            return $schema::schemaKey();
+        }
+
+        if (is_a($schema, Model::class, true)) {
+            return $this->getSchemaForModelClass($schema)::schemaKey();
+        }
+
+        return $schema;
+    }
+
+    /**
      * Combined no-target ability bag for multiple schemas. Each argument may be
      * a WardenSchema class string or a schema key.
      *

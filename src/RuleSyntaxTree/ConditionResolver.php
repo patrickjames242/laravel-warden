@@ -8,24 +8,14 @@ use Illuminate\Database\Query\Builder;
 /**
  * The seam between a compiled {@see WardenRuleSet} and the host schema. The
  * compiler only knows how to assemble boolean structure and the deny-overrides
- * formula; everything condition-specific (which conditions exist, whether they
- * are row-targeted, and the SQL they emit) is delegated here.
+ * formula; everything condition-specific (whether a condition is row-targeted,
+ * and the SQL it emits) is delegated here.
+ *
+ * Extends {@see SchemaVocabulary}: the declared ability list and name existence
+ * are pure vocabulary, shared with validation — which needs nothing more.
  */
-interface ConditionResolver
+interface ConditionResolver extends SchemaVocabulary
 {
-    /**
-     * Every ability declared by the schema. Used to expand `*` and to validate
-     * ability names.
-     *
-     * @return array<int, string>
-     */
-    public static function declaredAbilities(): array;
-
-    /**
-     * Whether a condition with this key is declared by the schema.
-     */
-    public function conditionExists(string $conditionKey): bool;
-
     /**
      * Whether the keyed condition is row-targeted (needs a target SQL id). A
      * targeted condition is forced to false when compiled without a target.

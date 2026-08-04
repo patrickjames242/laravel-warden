@@ -34,29 +34,6 @@ final class RuleSetCompiler
     }
 
     /**
-     * Validate every condition and ability name in the rule set against the
-     * schema. Runs before compilation so unknown names fail loudly.
-     */
-    public function validate(WardenRuleSet $ruleSet): void
-    {
-        $declaredAbilities = $this->conditions->declaredAbilities();
-
-        foreach ($ruleSet->rules as $rule) {
-            foreach ([...$rule->canAbilities, ...$rule->cannotAbilities] as $ability) {
-                if ($ability !== '*' && ! in_array($ability, $declaredAbilities, true)) {
-                    throw new InvalidArgumentException(
-                        sprintf('Ability [%s] is not declared by the schema.', $ability)
-                    );
-                }
-            }
-
-            if ($rule->conditions !== null) {
-                $this->validateConditionNames($rule->conditions);
-            }
-        }
-    }
-
-    /**
      * Build the predicate for a single ability as a nested query on $query.
      */
     public function compileAbility(
@@ -118,28 +95,6 @@ final class RuleSetCompiler
         }
 
         return $predicate;
-    }
-
-    private function validateConditionNames(IBooleanExpressionNode $node): void
-    {
-        match (true) {
-            $node instanceof ConditionNode => $this->assertConditionExists($node),
-            $node instanceof NotNode => $this->validateConditionNames($node->operand),
-            $node instanceof AndNode, $node instanceof OrNode => (function () use ($node): void {
-                $this->validateConditionNames($node->leftSide);
-                $this->validateConditionNames($node->rightSide);
-            })(),
-            default => null,
-        };
-    }
-
-    private function assertConditionExists(ConditionNode $node): void
-    {
-        if (! $this->conditions->conditionExists($node->conditionKey)) {
-            throw new InvalidArgumentException(
-                sprintf('Condition [%s] is not declared by the schema.', $node->conditionKey)
-            );
-        }
     }
 
     /**

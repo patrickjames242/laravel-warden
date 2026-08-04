@@ -9,6 +9,7 @@ use Warden\AbilityMatchMode;
 use Warden\RuleResolutionContext;
 use Warden\RuleResolver;
 use Warden\RuleSyntaxTree\RuleSetCompiler;
+use Warden\RuleSyntaxTree\RuleSetValidator;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 
 /**
@@ -209,7 +210,7 @@ trait BuildsAccessQueries
             ]);
         }
 
-        $this->compiler()->validate($ruleSet);
+        (new RuleSetValidator($this))->validate($ruleSet);
 
         return $ruleSet;
     }

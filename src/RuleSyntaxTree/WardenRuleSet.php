@@ -3,33 +3,43 @@
 namespace Warden\RuleSyntaxTree;
 
 use Closure;
+use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
+use Warden\Facades\Warden;
 use Warden\RuleSyntaxTree\Parsing\WardenParser;
+use Warden\Schema\WardenSchema;
 
 readonly class WardenRuleSet
 {
+    public string $schemaKey;
 
     /**
-     * @param string $schemaKey
+     * The schema this rule set targets may be given as a schema key string, a
+     * {@see WardenSchema} instance or class-string, or a {@see Model} instance or
+     * class-string; it is normalized to the schema key.
+     *
+     * @param Model|WardenSchema|string $schema
      * @param array<int, WardenRule> $rules
      */
     public function __construct(
-        public string $schemaKey,
+        Model|WardenSchema|string $schema,
         public array $rules,
     ){
-
+        $this->schemaKey = Warden::resolveSchemaKey($schema);
     }
 
     /**
      * Build a rule set by parsing raw Warden syntax, resolving any
      * named (:name) or positional (?) placeholders against $bindings.
+     *
+     * @param Model|WardenSchema|string $schema
      */
     public static function fromSyntax(
-        string $schemaKey,
+        Model|WardenSchema|string $schema,
         string $syntax,
         array $bindings = [],
     ): self {
-        return new self($schemaKey, WardenParser::parse($syntax, $bindings));
+        return new self($schema, WardenParser::parse($syntax, $bindings));
     }
 
     /**
@@ -38,10 +48,11 @@ readonly class WardenRuleSet
      * (which is finalized via toRule()). Does not accept bindings, and does not
      * allow mixing raw syntax with resolved rules.
      *
+     * @param Model|WardenSchema|string $schema
      * @param WardenRule|WardenRuleBuilder|array<int, WardenRule|WardenRuleBuilder> ...$rules
      */
     public static function fromRules(
-        string $schemaKey,
+        Model|WardenSchema|string $schema,
         WardenRule|WardenRuleBuilder|array ...$rules,
     ): self {
         $flattened = [];
@@ -62,7 +73,7 @@ readonly class WardenRuleSet
             }
         }
 
-        return new self($schemaKey, $flattened);
+        return new self($schema, $flattened);
     }
 
     /**
@@ -79,9 +90,10 @@ readonly class WardenRuleSet
      * });
      * ```
      *
+     * @param Model|WardenSchema|string $schema
      * @param Closure(callable():WardenRuleBuilder):void $callback
      */
-    public static function build(string $schemaKey, Closure $callback): self
+    public static function build(Model|WardenSchema|string $schema, Closure $callback): self
     {
         $builders = [];
 
@@ -91,7 +103,7 @@ readonly class WardenRuleSet
 
         $callback($make);
 
-        return self::fromRules($schemaKey, $builders);
+        return self::fromRules($schema, $builders);
     }
 
     /**
@@ -114,6 +126,45 @@ readonly class WardenRuleSet
     public function toBoundSyntax(): BoundSyntax
     {
         return RuleSyntaxWriter::toBoundSyntax(...$this->rules);
+    }
+
+    /**
+     * Validate every condition and ability name against the schema registered
+     * for this set's schema key, throwing on the first unknown name. Runs before
+     * compilation so mistakes surface loudly rather than silently producing an
+     * empty predicate.
+     *
+     * To validate against a schema you already hold, construct a
+     * {@see RuleSetValidator} directly rather than routing through the registry.
+     */
+    public function validate(): void
+    {
+        $schemaClass = Warden::getSchemaForKey($this->schemaKey);
+
+        (new RuleSetValidator(new $schemaClass))->validate($this);
+    }
+
+    /**
+     * Validate several rule sets, each against the schema registered for its own
+     * schema key. Throws on the first unknown name across the whole batch.
+     *
+     * Accepts a variadic list or arrays of rule sets.
+     *
+     * @param WardenRuleSet|array<int, WardenRuleSet> ...$ruleSets
+     */
+    public static function validateAll(WardenRuleSet|array ...$ruleSets): void
+    {
+        foreach ($ruleSets as $ruleSet) {
+            foreach (is_array($ruleSet) ? $ruleSet : [$ruleSet] as $one) {
+                if (! $one instanceof self) {
+                    throw new InvalidArgumentException(
+                        sprintf('validateAll expects WardenRuleSet instances, got %s.', get_debug_type($one))
+                    );
+                }
+
+                $one->validate();
+            }
+        }
     }
 
 }

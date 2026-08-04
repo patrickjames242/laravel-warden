@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Warden\RuleSyntaxTree\ConditionResolver;
 use Warden\RuleSyntaxTree\RuleSetCompiler;
+use Warden\RuleSyntaxTree\RuleSetValidator;
 use Warden\RuleSyntaxTree\WardenRuleSet;
 
 /**
@@ -162,15 +163,15 @@ it('forces a targeted condition to false with no target, true under not', functi
 });
 
 it('validates unknown ability and condition names', function () {
-    $compiler = new RuleSetCompiler(new FakeConditionResolver);
+    $validator = new RuleSetValidator(new FakeConditionResolver);
 
-    expect(fn () => $compiler->validate(WardenRuleSet::fromSyntax('docs', 'they can fly')))
+    expect(fn () => $validator->validate(WardenRuleSet::fromSyntax('docs', 'they can fly')))
         ->toThrow(InvalidArgumentException::class, 'Ability [fly]');
 
-    expect(fn () => $compiler->validate(WardenRuleSet::fromSyntax('docs', 'if is_wizard they can view')))
+    expect(fn () => $validator->validate(WardenRuleSet::fromSyntax('docs', 'if is_wizard they can view')))
         ->toThrow(InvalidArgumentException::class, 'Condition [is_wizard]');
 
     // A valid set passes silently.
-    $compiler->validate(WardenRuleSet::fromSyntax('docs', 'if is_teacher they can view, edit'));
+    $validator->validate(WardenRuleSet::fromSyntax('docs', 'if is_teacher they can view, edit'));
     expect(true)->toBeTrue();
 });
