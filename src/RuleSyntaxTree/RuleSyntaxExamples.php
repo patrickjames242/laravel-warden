@@ -153,46 +153,35 @@ class RuleSyntaxExamples
      * A condition's DSL arguments arrive as a single trailing `array $parameters`
      * bag (the resolved ConditionNode::$parameters). The condition indexes it and
      * is responsible for binding every value as a placeholder — never
-     * interpolating it into SQL. The bag is always the last argument, after the
-     * target SQL id for targeted conditions:
+     * interpolating it into SQL. The arguments arrive on the condition's context
+     * object as `$c->arguments`:
      *
-     *   use Illuminate\Contracts\Auth\Authenticatable;
-     *   use Illuminate\Contracts\Database\Query\Builder;
-     *   use Warden\ConditionWithTarget;
-     *   use Warden\ConditionWithoutTarget;
+     *   use Warden\TargetedCondition;
+     *   use Warden\GlobalCondition;
+     *   use Warden\Schema\Conditions\TargetedConditionContext;
+     *   use Warden\Schema\Conditions\GlobalConditionContext;
      *
-     *   // Targeted: (user, whereClause, targetSqlId, parameters)
-     *   #[ConditionWithTarget]
-     *   public function conditionIsSpecificUser(
-     *       Authenticatable $user,
-     *       Builder $where,
-     *       string $targetSqlId,
-     *       array $parameters,
-     *   ): Builder {
-     *       // is_specific_user('some-user-id') -> $parameters[0] === 'some-user-id'
-     *       return $where->whereRaw("{$targetSqlId} = ?", [$parameters[0]]);
+     *   // Targeted: the context carries the target SQL id and the DSL arguments.
+     *   #[TargetedCondition]
+     *   public function isSpecificUser(TargetedConditionContext $c): Builder {
+     *       // is_specific_user('some-user-id') -> $c->arguments[0] === 'some-user-id'
+     *       return $c->query->whereRaw("{$c->targetSqlId} = ?", [$c->arguments[0]]);
      *   }
      *
      *   // Variadic / list argument -> a whereIn:
-     *   #[ConditionWithTarget]
-     *   public function conditionIsDepartment(
-     *       Authenticatable $user,
-     *       Builder $where,
-     *       string $targetSqlId,
-     *       array $parameters,
-     *   ): Builder {
+     *   #[TargetedCondition]
+     *   public function isDepartment(TargetedConditionContext $c): Builder {
      *       // is_department(?, ?, ?) with positional bindings ['a', 'b', 'c']
-     *       return $where->whereIn($targetSqlId, $parameters);
+     *       return $c->query->whereIn($c->targetSqlId, $c->arguments);
      *   }
      *
-     *   // No-target boolean condition: (user, ...) returning true/false.
-     *   #[ConditionWithoutTarget]
-     *   public function conditionIsSuperUser(Authenticatable $user): bool {
-     *       return $user->isSuperUser();
+     *   // No-target boolean condition: returns true/false, ignoring the query.
+     *   #[GlobalCondition]
+     *   public function isSuperUser(GlobalConditionContext $c): bool {
+     *       return $c->user->isSuperUser();
      *   }
      *
-     * Conditions that ignore arguments simply omit the trailing bag; PHP drops
-     * the extra argument.
+     * Conditions that ignore arguments simply never read `$c->arguments`.
      */
     public function conditionParameterContract(): void
     {

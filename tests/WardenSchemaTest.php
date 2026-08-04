@@ -185,6 +185,21 @@ it('returns targeted, no-target, and all condition keys', function () {
     expect(WardenTestSchema::conditionKeys())->toBe(['is_advisor', 'is_teacher']);
 });
 
+it('derives condition keys by snake-casing the method name, no prefix', function () {
+    // isTeacher -> is_teacher, isAdvisor -> is_advisor (no `condition` prefix).
+    expect(WardenTestSchema::conditionKeys())->toBe(['is_advisor', 'is_teacher']);
+});
+
+it('rejects a condition method typed with the wrong context', function () {
+    expect(fn () => MistypedConditionSchema::conditionKeys())
+        ->toThrow(InvalidArgumentException::class, 'must accept exactly one');
+});
+
+it('rejects a condition method that takes extra parameters', function () {
+    expect(fn () => ExtraParamConditionSchema::conditionKeys())
+        ->toThrow(InvalidArgumentException::class, 'must accept exactly one');
+});
+
 it('requires a target sql id for targeted conditions', function () {
     expect(fn () => (new WardenTestSchema)->applyConditionFilter(
         'is_teacher',

@@ -6,12 +6,12 @@ use Attribute;
 use InvalidArgumentException;
 
 #[Attribute(Attribute::TARGET_METHOD)]
-class ConditionWithTarget
+class GlobalCondition
 {
     public function __construct(public ?string $key = null)
     {
         if ($this->key === '') {
-            throw new InvalidArgumentException('ConditionWithTarget key cannot be empty.');
+            throw new InvalidArgumentException('GlobalCondition key cannot be empty.');
         }
     }
 }

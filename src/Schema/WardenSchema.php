@@ -15,7 +15,7 @@ use Warden\Schema\Concerns\ResolvesConditions;
 /**
  * A Warden schema declares the vocabulary a rule string may reference for one
  * entity: its abilities (`#[Ability]` constants) and its conditions
- * (`#[ConditionWith(out)Target]` methods, which emit SQL). It is NOT where the
+ * (`#[TargetedCondition]` / `#[GlobalCondition]` methods, which emit SQL). It is NOT where the
  * rules live — those come from the {@see RuleResolver} as a
  * {@see \Warden\RuleSyntaxTree\WardenRuleSet}, compiled against this schema.
  *

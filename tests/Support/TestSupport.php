@@ -5,14 +5,16 @@ use Illuminate\Contracts\Database\Query\Builder as BuilderContract;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Warden\Ability;
-use Warden\ConditionWithoutTarget;
-use Warden\ConditionWithTarget;
 use Warden\Facades\Warden;
+use Warden\GlobalCondition;
 use Warden\HasWardenSchema;
 use Warden\RuleResolutionContext;
 use Warden\RuleResolver;
 use Warden\RuleSyntaxTree\WardenRule;
 use Warden\RuleSyntaxTree\WardenRuleSet;
+use Warden\Schema\Conditions\GlobalConditionContext;
+use Warden\Schema\Conditions\TargetedConditionContext;
+use Warden\TargetedCondition;
 use Warden\Schema\WardenSchema;
 use Warden\WardenManager;
 
@@ -81,16 +83,16 @@ class WardenTestSchema extends WardenSchema
     #[Ability]
     public const ABILITY_UPDATE = 'update';
 
-    #[ConditionWithTarget]
-    public function conditionIsTeacher(Authenticatable $currentUser, BuilderContract $whereClause, string $targetSqlId): BuilderContract
+    #[TargetedCondition]
+    public function isTeacher(TargetedConditionContext $c): BuilderContract
     {
-        return $whereClause->whereRaw("{$targetSqlId} = ?", ["teacher:{$currentUser->role_id}"]);
+        return $c->query->whereRaw("{$c->targetSqlId} = ?", ["teacher:{$c->user->role_id}"]);
     }
 
-    #[ConditionWithoutTarget]
-    public function conditionIsAdvisor(Authenticatable $currentUser, BuilderContract $whereClause): BuilderContract
+    #[GlobalCondition]
+    public function isAdvisor(GlobalConditionContext $c): BuilderContract
     {
-        return $whereClause->whereRaw('? = ?', ['advisor', $currentUser->role_id]);
+        return $c->query->whereRaw('? = ?', ['advisor', $c->user->role_id]);
     }
 }
 
@@ -101,10 +103,40 @@ class WardenBooleanConditionSchema extends WardenSchema
     #[Ability]
     public const ABILITY_VIEW = 'view';
 
-    #[ConditionWithoutTarget]
-    public function conditionIsSuperUser(Authenticatable $currentUser): bool
+    #[GlobalCondition]
+    public function isSuperUser(GlobalConditionContext $c): bool
     {
-        return $currentUser->role_id === 'super-role';
+        return $c->user->role_id === 'super-role';
+    }
+}
+
+class MistypedConditionSchema extends WardenSchema
+{
+    public const model = WardenTestModel::class;
+
+    #[Ability]
+    public const ABILITY_VIEW = 'view';
+
+    // Marked targeted but typed with the global context — a boot-time mistake.
+    #[TargetedCondition]
+    public function isWrong(GlobalConditionContext $c): BuilderContract
+    {
+        return $c->query;
+    }
+}
+
+class ExtraParamConditionSchema extends WardenSchema
+{
+    public const model = WardenTestModel::class;
+
+    #[Ability]
+    public const ABILITY_VIEW = 'view';
+
+    // One context parameter is the whole contract; a second is a mistake.
+    #[GlobalCondition]
+    public function isWrong(GlobalConditionContext $c, string $extra): bool
+    {
+        return $extra !== '';
     }
 }
 

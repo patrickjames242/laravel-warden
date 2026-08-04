@@ -6,6 +6,8 @@ use BadMethodCallException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Database\Query\Builder;
 use InvalidArgumentException;
+use Warden\Schema\Conditions\GlobalConditionContext;
+use Warden\Schema\Conditions\TargetedConditionContext;
 
 /**
  * The vocabulary seam the compiler dispatches into (the {@see \Warden\RuleSyntaxTree\ConditionResolver}
@@ -18,18 +20,20 @@ trait ResolvesConditions
      * Applies a named condition filter to the provided builder.
      *
      * The named condition must correspond to a public method declared on the
-     * schema and marked with either `#[ConditionWithTarget(...)]` or
-     * `#[ConditionWithoutTarget(...)]`. The builder is mutated in place and also
+     * schema and marked with either `#[TargetedCondition(...)]` or
+     * `#[GlobalCondition(...)]`. The method receives a single context object
+     * carrying the user, the builder, the DSL arguments, and — for targeted
+     * conditions — the target SQL id. The builder is mutated in place and also
      * returned for convenience.
      *
-     * @param array<int, mixed> $parameters The resolved DSL arguments for the condition.
+     * @param array<int, mixed> $arguments The resolved DSL arguments for the condition.
      */
     public function applyConditionFilter(
         string $conditionKey,
         Authenticatable $currentUser,
         Builder $whereClause,
         ?string $targetSqlId = null,
-        array $parameters = []
+        array $arguments = []
     ): mixed
     {
         $conditionDefinition = static::conditionDefinitionForKey($conditionKey);
@@ -42,24 +46,19 @@ trait ResolvesConditions
 
         $methodName = $conditionDefinition['method']->getName();
 
-        if ($conditionDefinition['has_target'] && $targetSqlId === null) {
-            throw new InvalidArgumentException(
-                sprintf('Condition [%s] on schema [%s] requires a target SQL id.', $conditionKey, static::class)
-            );
-        }
-
-        $arguments = [$currentUser, $whereClause];
-
         if ($conditionDefinition['has_target']) {
-            $arguments[] = $targetSqlId;
+            if ($targetSqlId === null) {
+                throw new InvalidArgumentException(
+                    sprintf('Condition [%s] on schema [%s] requires a target SQL id.', $conditionKey, static::class)
+                );
+            }
+
+            $context = new TargetedConditionContext($currentUser, $whereClause, $targetSqlId, $arguments);
+        } else {
+            $context = new GlobalConditionContext($currentUser, $whereClause, $arguments);
         }
 
-        /* Conditions receive their DSL arguments as a trailing bag. Methods that
-           ignore parameters simply don't declare the trailing argument; PHP drops
-           the extra. */
-        $arguments[] = $parameters;
-
-        return $this->{$methodName}(...$arguments);
+        return $this->{$methodName}($context);
     }
 
     // -- ConditionResolver ----------------------------------------------------

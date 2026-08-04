@@ -6,12 +6,12 @@ use Attribute;
 use InvalidArgumentException;
 
 #[Attribute(Attribute::TARGET_METHOD)]
-class ConditionWithoutTarget
+class TargetedCondition
 {
     public function __construct(public ?string $key = null)
     {
         if ($this->key === '') {
-            throw new InvalidArgumentException('ConditionWithoutTarget key cannot be empty.');
+            throw new InvalidArgumentException('TargetedCondition key cannot be empty.');
         }
     }
 }

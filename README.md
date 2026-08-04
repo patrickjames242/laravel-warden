@@ -232,12 +232,13 @@ each.
 namespace App\Warden;
 
 use App\Models\Timesheet;
-use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Database\Query\Builder;
 use Warden\Ability;
-use Warden\ConditionWithoutTarget;
-use Warden\ConditionWithTarget;
+use Warden\GlobalCondition;
+use Warden\Schema\Conditions\GlobalConditionContext;
+use Warden\Schema\Conditions\TargetedConditionContext;
 use Warden\Schema\WardenSchema;
+use Warden\TargetedCondition;
 
 class TimesheetSchema extends WardenSchema
 {
@@ -249,23 +250,23 @@ class TimesheetSchema extends WardenSchema
     #[Ability] public const APPROVE = 'approve';
 
     // Targeted: narrows WHICH timesheet rows the user matches.
-    #[ConditionWithTarget]
-    public function conditionIsSelf(Authenticatable $user, Builder $where, string $targetSqlId): Builder
+    #[TargetedCondition]
+    public function isSelf(TargetedConditionContext $c): Builder
     {
-        return $where->whereRaw('timesheets.user_id = ?', [$user->getAuthIdentifier()]);
+        return $c->query->whereRaw('timesheets.user_id = ?', [$c->user->getAuthIdentifier()]);
     }
 
-    #[ConditionWithTarget]
-    public function conditionInDepartment(Authenticatable $user, Builder $where, string $targetSqlId, array $parameters): Builder
+    #[TargetedCondition]
+    public function inDepartment(TargetedConditionContext $c): Builder
     {
-        return $where->whereIn('timesheets.department_id', $parameters);
+        return $c->query->whereIn('timesheets.department_id', $c->arguments);
     }
 
     // No-target: a plain yes/no about the user, independent of any row.
-    #[ConditionWithoutTarget]
-    public function conditionIsAdmin(Authenticatable $user): bool
+    #[GlobalCondition]
+    public function isAdmin(GlobalConditionContext $c): bool
     {
-        return (bool) $user->is_admin;
+        return (bool) $c->user->is_admin;
     }
 }
 ```
@@ -366,82 +367,77 @@ time (see [validation](#how-it-compiles-to-sql)). Warden ships a
 ### Conditions
 
 Conditions are the predicates a rule may test in its `if`. Each is a public
-method marked with `#[ConditionWithTarget]` or `#[ConditionWithoutTarget]`. The
-condition **name** used in rules is derived from the method name: the leading
-`condition` is stripped and the rest is snake-cased (`conditionIsSelf` →
-`is_self`). You can override it: `#[ConditionWithTarget('is_owner')]`.
+method marked with `#[TargetedCondition]` or `#[GlobalCondition]`. The condition
+**name** used in rules is derived from the method name by snake-casing it
+(`isSelf` → `is_self`). You can override it: `#[TargetedCondition('is_owner')]`.
+
+Every condition method takes a **single context object** and returns `Builder`
+(mutated) or, for a global condition, a `bool`. The context carries the current
+user, the query builder, the DSL `arguments`, and — for targeted conditions —
+the `targetSqlId`.
 
 A condition's one job is to **emit SQL**. There is no in-memory evaluation path —
 even a single-object check runs as a scoped query. This keeps a condition's
 behavior identical whether you're filtering a list or checking one row.
 
-### Targeted vs. no-target conditions
+### Targeted vs. global conditions
 
 The distinction is: *does this predicate talk about a specific row?*
 
-- **`#[ConditionWithTarget]`** — the predicate constrains *which rows* match. It
-  receives the qualified primary-key SQL id of the entity (`timesheets.id`) and
-  mutates a query builder to add its `WHERE` fragment. Signature:
+- **`#[TargetedCondition]`** — the predicate constrains *which rows* match. Its
+  context is a `TargetedConditionContext` carrying `targetSqlId`, the qualified
+  primary-key SQL id of the entity (`timesheets.id`). Mutate `$c->query` to add
+  the `WHERE` fragment:
 
   ```php
-  #[ConditionWithTarget]
-  public function conditionIsSelf(
-      Authenticatable $user,
-      Builder $where,          // add your predicate to this
-      string $targetSqlId,     // e.g. "timesheets.id" (the correlated row)
-  ): Builder {
-      return $where->whereRaw('timesheets.user_id = ?', [$user->getAuthIdentifier()]);
+  #[TargetedCondition]
+  public function isSelf(TargetedConditionContext $c): Builder
+  {
+      // $c->targetSqlId === "timesheets.id" (the correlated row under test)
+      return $c->query->whereRaw('timesheets.user_id = ?', [$c->user->getAuthIdentifier()]);
   }
   ```
 
   Your predicate may reference any column of the entity's table; it is evaluated
   correlated to the row under test.
 
-- **`#[ConditionWithoutTarget]`** — the predicate is about the *user or the
-  world*, not a row (e.g. "is this user an admin?", "is this tenant on the pro
-  plan?"). It may either mutate a builder like a targeted condition, or simply
-  **return a `bool`**:
+- **`#[GlobalCondition]`** — the predicate is about the *user or the world*, not a
+  row (e.g. "is this user an admin?", "is this tenant on the pro plan?"). Its
+  context is a `GlobalConditionContext` (no `targetSqlId`). It may mutate
+  `$c->query` like a targeted condition, or simply **return a `bool`**:
 
   ```php
-  #[ConditionWithoutTarget]
-  public function conditionIsAdmin(Authenticatable $user): bool
+  #[GlobalCondition]
+  public function isAdmin(GlobalConditionContext $c): bool
   {
-      return (bool) $user->is_admin;   // true grants outright, false grants nothing
+      return (bool) $c->user->is_admin;   // true grants outright, false grants nothing
   }
   ```
 
 Why the split matters: some checks (**capability checks** and
 `getAbilitiesWithoutTarget`) run with *no row*. In that context a targeted
 condition can't be evaluated, so Warden treats it as **false** (and therefore
-`not <targeted>` as **true**). No-target conditions still evaluate normally.
+`not <targeted>` as **true**). Global conditions still evaluate normally.
 
 > **Values are always bound.** Whatever you pass into `whereRaw`, `whereIn`,
 > etc. becomes a bound parameter. Never interpolate a value into the SQL string
 > — conditions run against user- and rule-supplied data.
 
-### Conditions with parameters
+### Conditions with arguments
 
 A condition can take arguments from the rule (`in_department('sales')`). The
-resolved arguments arrive as one trailing **`array $parameters`** bag — always
-the last argument, after `$targetSqlId` for targeted conditions:
+resolved arguments arrive on the context as **`$c->arguments`**, in order:
 
 ```php
-#[ConditionWithTarget]
-public function conditionInDepartment(
-    Authenticatable $user,
-    Builder $where,
-    string $targetSqlId,
-    array $parameters,          // the rule's arguments, in order
-): Builder {
-    // in_department('sales', 'eng')  ->  $parameters === ['sales', 'eng']
-    return $where->whereIn('timesheets.department_id', $parameters);
+#[TargetedCondition]
+public function inDepartment(TargetedConditionContext $c): Builder
+{
+    // in_department('sales', 'eng')  ->  $c->arguments === ['sales', 'eng']
+    return $c->query->whereIn('timesheets.department_id', $c->arguments);
 }
 ```
 
-A no-target condition that takes parameters omits `$targetSqlId`:
-`conditionX(Authenticatable $user, Builder $where, array $parameters)`. A
-condition that ignores arguments simply doesn't declare the trailing bag — PHP
-drops the extra.
+A condition that ignores arguments simply never reads `$c->arguments`.
 
 ---
 
@@ -956,8 +952,8 @@ TimesheetSchema::getUserAbilities();                   // all no-target abilitie
 ```
 
 For section-level capabilities with no model at all, define a schema with
-`public const model = ''` and only `#[ConditionWithoutTarget]` conditions. In a
-no-target check, targeted conditions are treated as false, so only no-target
+`public const model = ''` and only `#[GlobalCondition]` conditions. In a
+no-target check, targeted conditions are treated as false, so only global
 logic contributes.
 
 ### Match modes
@@ -1069,7 +1065,7 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 - `const model` — managed Eloquent model (or `''` for a capability schema)
 - `const schemaKey` — optional schema-key override
 - `#[Ability] const X = '...'` — declare an ability
-- `#[ConditionWithTarget]` / `#[ConditionWithoutTarget]` methods — declare conditions
+- `#[TargetedCondition]` / `#[GlobalCondition]` methods — declare conditions
 - `protected function implicitRules(): array` — always-on rules
 
 **Build rules**

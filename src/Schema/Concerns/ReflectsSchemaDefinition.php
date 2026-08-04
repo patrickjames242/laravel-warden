@@ -8,14 +8,17 @@ use InvalidArgumentException;
 use ReflectionClass;
 use ReflectionClassConstant;
 use ReflectionMethod;
+use ReflectionNamedType;
 use Warden\Ability;
-use Warden\ConditionWithoutTarget;
-use Warden\ConditionWithTarget;
+use Warden\GlobalCondition;
+use Warden\Schema\Conditions\GlobalConditionContext;
+use Warden\Schema\Conditions\TargetedConditionContext;
+use Warden\TargetedCondition;
 
 /**
  * Reflection over a schema's declared vocabulary: the abilities (from `#[Ability]`
- * constants) and the conditions (from `#[ConditionWith(out)Target]` methods) that
- * a rule string is allowed to reference.
+ * constants) and the conditions (from `#[TargetedCondition]` / `#[GlobalCondition]`
+ * methods) that a rule string is allowed to reference.
  */
 trait ReflectsSchemaDefinition
 {
@@ -55,7 +58,7 @@ trait ReflectsSchemaDefinition
      * Returns all targeted condition keys declared by the schema.
      *
      * A targeted condition key is discovered from each public method marked with
-     * `#[ConditionWithTarget(...)]`.
+     * `#[TargetedCondition(...)]`.
      *
      * @return array<int, string>
      */
@@ -74,7 +77,7 @@ trait ReflectsSchemaDefinition
      * Returns all no-target condition keys declared by the schema.
      *
      * A no-target condition key is discovered from each public method marked with
-     * `#[ConditionWithoutTarget(...)]`.
+     * `#[GlobalCondition(...)]`.
      *
      * @return array<int, string>
      */
@@ -141,15 +144,11 @@ trait ReflectsSchemaDefinition
 
     protected static function conditionKeyFromMethodName(string $methodName): ?string
     {
-        $conditionKey = str_starts_with($methodName, 'condition')
-            ? Str::after($methodName, 'condition')
-            : $methodName;
-
-        if ($conditionKey === '') {
+        if ($methodName === '') {
             return null;
         }
 
-        return Str::snake($conditionKey);
+        return Str::snake($methodName);
     }
 
     /**
@@ -165,33 +164,33 @@ trait ReflectsSchemaDefinition
                     return null;
                 }
 
-                $withTargetAttributes = $method->getAttributes(ConditionWithTarget::class);
-                $withoutTargetAttributes = $method->getAttributes(ConditionWithoutTarget::class);
+                $targetedAttributes = $method->getAttributes(TargetedCondition::class);
+                $globalAttributes = $method->getAttributes(GlobalCondition::class);
 
-                if ($withTargetAttributes === [] && $withoutTargetAttributes === []) {
+                if ($targetedAttributes === [] && $globalAttributes === []) {
                     return null;
                 }
 
-                if (count($withTargetAttributes) > 1 || count($withoutTargetAttributes) > 1) {
+                if (count($targetedAttributes) > 1 || count($globalAttributes) > 1) {
                     throw new InvalidArgumentException(sprintf(
-                        'Condition method [%s::%s] must not declare duplicate condition target attributes.',
+                        'Condition method [%s::%s] must not declare duplicate condition attributes.',
                         static::class,
                         $method->getName()
                     ));
                 }
 
-                if ($withTargetAttributes !== [] && $withoutTargetAttributes !== []) {
+                if ($targetedAttributes !== [] && $globalAttributes !== []) {
                     throw new InvalidArgumentException(sprintf(
-                        'Condition method [%s::%s] cannot declare both #[ConditionWithTarget] and #[ConditionWithoutTarget].',
+                        'Condition method [%s::%s] cannot declare both #[TargetedCondition] and #[GlobalCondition].',
                         static::class,
                         $method->getName()
                     ));
                 }
 
-                $hasTarget = $withTargetAttributes !== [];
+                $hasTarget = $targetedAttributes !== [];
                 $attributeInstance = $hasTarget
-                    ? $withTargetAttributes[0]->newInstance()
-                    : $withoutTargetAttributes[0]->newInstance();
+                    ? $targetedAttributes[0]->newInstance()
+                    : $globalAttributes[0]->newInstance();
                 $conditionKey = $attributeInstance->key ?? static::conditionKeyFromMethodName($method->getName());
 
                 if (!is_string($conditionKey) || $conditionKey === '') {
@@ -202,24 +201,26 @@ trait ReflectsSchemaDefinition
                     ));
                 }
 
-                $parameterCount = $method->getNumberOfParameters();
+                /* The attribute chooses the context: a targeted condition receives
+                   a TargetedConditionContext (carrying the target SQL id), a global
+                   one a GlobalConditionContext. Require the single parameter to be
+                   typed accordingly so a mismatch fails loudly at boot. */
+                $expectedContext = $hasTarget
+                    ? TargetedConditionContext::class
+                    : GlobalConditionContext::class;
+                $parameters = $method->getParameters();
+                $parameterType = ($parameters[0] ?? null)?->getType();
 
-                if ($hasTarget && $parameterCount < 3) {
+                if (
+                    count($parameters) !== 1
+                    || !$parameterType instanceof ReflectionNamedType
+                    || $parameterType->getName() !== $expectedContext
+                ) {
                     throw new InvalidArgumentException(sprintf(
-                        'Condition method [%s::%s] must accept a target SQL id parameter when marked #[ConditionWithTarget].',
+                        'Condition method [%s::%s] must accept exactly one [%s] parameter.',
                         static::class,
-                        $method->getName()
-                    ));
-                }
-
-                /* No-target conditions accept at most (user, whereClause,
-                   parameters). A fourth parameter means the author is expecting a
-                   target SQL id they will never receive. */
-                if (!$hasTarget && $parameterCount > 3) {
-                    throw new InvalidArgumentException(sprintf(
-                        'Condition method [%s::%s] must not accept a target SQL id parameter when marked #[ConditionWithoutTarget].',
-                        static::class,
-                        $method->getName()
+                        $method->getName(),
+                        $expectedContext
                     ));
                 }
 
