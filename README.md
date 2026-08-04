@@ -59,9 +59,9 @@ full detail, and exactly how you hand rules to the library.
 
 ## The problem
 
-Say the rule is: *a user can update a timesheet if it's their own, or if they
-manage the department it belongs to — but never once it's locked (unless they're
-an admin).*
+Say the rule is: *a user can update a timesheet if it's their own, or if it
+belongs to a specific department (say, `sales`) — but never once it's locked
+(unless they're an admin).*
 
 With a **Laravel Policy** you write that once, for a single object:
 
@@ -79,7 +79,7 @@ class TimesheetPolicy
         }
 
         return $timesheet->user_id === $user->id
-            || $user->managedDepartmentIds()->contains($timesheet->department_id);
+            || $timesheet->department_id === 'sales';
     }
 }
 ```
@@ -103,7 +103,7 @@ Timesheet::query()
         $q->where('locked', false)
           ->where(fn ($q) => $q
               ->where('user_id', $user->id)
-              ->orWhereIn('department_id', $user->managedDepartmentIds()));
+              ->orWhere('department_id', 'sales')); // 'sales' hardcoded a second time
     })
     ->paginate();
 ```
@@ -135,8 +135,8 @@ $user->givePermissionTo('update timesheets');
 $user->can('update timesheets'); // true or false, for ALL timesheets
 ```
 
-There's no room in `'update timesheets'` for *"their own"*, *"in a department they
-manage"*, or *"unless locked."* The moment a permission is conditional on the
+There's no room in `'update timesheets'` for *"their own"*, *"in the sales
+department"*, or *"unless locked."* The moment a permission is conditional on the
 record, you're back to writing a Policy — and back to both problems above.
 
 And in every one of these, **the rule is code**. Want managers to approve
@@ -148,13 +148,75 @@ per tenant, can't let an admin screen define it, can't audit it as data.
 Write the rule once, as data:
 
 ```text
-if is_self or manages_department they can update
+if is_self or manages_department('sales') they can update
 if is_locked and not is_admin they cannot update
 if is_admin they can *
 ```
 
 (Note how the "unless they're an admin" exception is just `and not is_admin` on
-the deny — the whole rule is right there, readable, in three lines.)
+the deny — the whole rule is right there, readable, in three lines. And
+`manages_department('sales')` shows a condition taking a *parameter*: the same
+condition serves every department, and the rule says which one.)
+
+Those condition names aren't magic strings — you define, once, how each one
+resolves. A schema declares the vocabulary and teaches every condition how to
+emit SQL:
+
+```php
+namespace App\Warden;
+
+use App\Models\Timesheet;
+use Illuminate\Contracts\Database\Query\Builder;
+use Warden\Ability;
+use Warden\GlobalCondition;
+use Warden\Schema\Conditions\GlobalConditionContext;
+use Warden\Schema\Conditions\TargetedConditionContext;
+use Warden\Schema\WardenSchema;
+use Warden\TargetedCondition;
+
+class TimesheetSchema extends WardenSchema
+{
+    public const model = Timesheet::class;
+
+    #[Ability] public const VIEW   = 'view';
+    #[Ability] public const UPDATE = 'update';
+
+    // Targeted: narrows WHICH timesheet rows the user matches.
+    #[TargetedCondition]
+    public function isSelf(TargetedConditionContext $c): Builder
+    {
+        return $c->query->whereRaw('timesheets.user_id = ?', [$c->user->getAuthIdentifier()]);
+    }
+
+    // The rule's argument arrives on $c->arguments — here the department the
+    // rule named, e.g. manages_department('sales'). One condition, every
+    // department; the rule assigned to the user picks which.
+    #[TargetedCondition]
+    public function managesDepartment(TargetedConditionContext $c): Builder
+    {
+        [$department] = $c->arguments;
+
+        return $c->query->where('timesheets.department_id', $department);
+    }
+
+    #[TargetedCondition]
+    public function isLocked(TargetedConditionContext $c): Builder
+    {
+        return $c->query->where('timesheets.locked', true);
+    }
+
+    // Global: a plain yes/no about the user, independent of any row.
+    #[GlobalCondition]
+    public function isAdmin(GlobalConditionContext $c): bool
+    {
+        return (bool) $c->user->is_admin;
+    }
+}
+```
+
+Each condition is written once, in PHP, and every rule that names it — in any
+tenant, role, or admin-defined policy — reuses that same SQL. The rules stay
+data; the schema is the only code.
 
 Warden compiles it to SQL, so one rule set answers all three questions —
 consistently, because there's only one source of truth:
@@ -167,7 +229,53 @@ Timesheet::query()->hasAbility('update')->paginate();
 Timesheet::query()->selectAbilities()->get();   // each row ->abilities = ['view','update']
 
 // "Can they update this one?"  -> a scoped EXISTS
-Timesheet::userHasAbilities('update', $timesheet);
+$timesheet->hasAbility('update');
+```
+
+And notice what's *missing*: Warden never told you where those rules live.
+Unlike laravel-permission or Bouncer — which own a set of tables and expect
+permissions to be stored their way — Warden doesn't store anything. It doesn't
+care whether you keep rules in a database, generate them on the fly from a
+settings screen, read them off a JWT claim, or hardcode them for a plan tier.
+The *only* thing Warden asks is that a **resolver** hand back the rules for the
+current request:
+
+```php
+class DatabaseRuleResolver implements RuleResolver
+{
+    public function resolve(RuleResolutionContext $context): WardenRuleSet
+    {
+        if ($context->schemaKey === 'timesheets'){
+            // However you want to produce the rules — this is entirely yours:
+            if ($context->user->is_manager) {
+                return WardenRuleSet::fromSyntax(
+                    $context->schemaKey,
+                    'if is_self or manages_department(:dept) they can update
+                     if is_locked and not is_admin they cannot update
+                     if is_admin they can *',
+                    bindings: ['dept' => $context->user->department],
+                );
+            } else {
+                return WardenRuleSet::fromSyntax(
+                    $context->schemaKey,
+                    "if is_self they can update",
+                );
+            }
+        }   
+        // ...
+    }
+}
+```
+
+Fetch it from a table, build it from config, compose it per tenant — Warden
+picks up wherever your resolver leaves off and compiles the result to SQL.
+
+You point Warden at your resolver and register your schemas in
+`config/warden.php`:
+
+```php
+'rule_resolver' => App\Warden\DatabaseRuleResolver::class,
+'schemas'       => [App\Warden\TimesheetSchema::class],
 ```
 
 The rest of this README is how that works.
