@@ -10,12 +10,14 @@ use Attribute;
  * the `context:` bag; the constant's name is irrelevant to Warden (mirroring
  * `#[Ability]`).
  *
- * `required: true` makes the key mandatory: any check on the schema throws
- * unless the key is present in the effective context (explicitly passed or
- * supplied by `defaultContext()`). Leave it false for an optional frame.
+ * Keys are **required by default**: any check on the schema throws unless the
+ * key is present in the effective context (explicitly passed or supplied by
+ * `defaultContext()`). Pass `required: false` for an optional frame — but only
+ * for one that never gates a `cannot`, since a missing optional key silently
+ * lifts a deny rather than failing loud.
  */
 #[Attribute(Attribute::TARGET_CLASS_CONSTANT)]
 class ContextKey
 {
-    public function __construct(public bool $required = false) {}
+    public function __construct(public bool $required = true) {}
 }

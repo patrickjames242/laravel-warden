@@ -35,8 +35,8 @@ class ContextDocSchema extends WardenSchema
 
     #[Ability] public const VIEW = 'view';
 
-    #[ContextKey(required: true)] public const WORKSPACE = 'workspace_id';
-    #[ContextKey] public const AS_OF = 'as_of_date';
+    #[ContextKey] public const WORKSPACE = 'workspace_id';                // required by default
+    #[ContextKey(required: false)] public const AS_OF = 'as_of_date';     // opt-out
 
     #[TargetedCondition]
     public function inWorkspace(TargetedConditionContext $c): BuilderContract

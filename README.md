@@ -559,11 +559,11 @@ current tenant, an academic year, an as-of date, an impersonated user. These are
 constant's *value* is the key string; its name is irrelevant to Warden:
 
 ```php
-// Loud invariant: no check on this resource resolves without the frame.
-#[ContextKey(required: true)] public const WORKSPACE = 'workspace_id';
+// Required by default: no check on this resource resolves without the frame.
+#[ContextKey] public const WORKSPACE = 'workspace_id';
 
-// Optional frame: declared so a rule may reference it, but not mandatory.
-#[ContextKey] public const AS_OF = 'as_of_date';
+// Opt out for a frame that only gates grants.
+#[ContextKey(required: false)] public const AS_OF = 'as_of_date';
 ```
 
 A rule references a context key with `@context <key>` (see
@@ -581,11 +581,12 @@ public function inWorkspace(TargetedConditionContext $c): Builder
 }
 ```
 
-**`required: true`** makes the key mandatory: any check on the schema throws
-unless the key is present in the effective context. Use it for a frame that gates
-a `cannot` — a missing optional key silently *lifts* a deny (see
-[Check-time context](#check-time-context-context)), and `required` is what
-forecloses that. Leave a grant-only frame optional.
+**Keys are required by default:** any check on the schema throws unless the key
+is present in the effective context. Opt out with
+**`#[ContextKey(required: false)]`** only for a frame that never gates a `cannot`
+— a missing *optional* key silently *lifts* a deny (see
+[Check-time context](#check-time-context-context)), and required-ness is what
+forecloses that. When in doubt, leave it required.
 
 **`defaultContext()`** supplies defaults so callers may omit a key — and so
 param-less paths (route middleware, the `selectAbilities` global scope) get a
@@ -785,12 +786,13 @@ unaffected.
 
 **When the key is absent at check time:**
 
-- If it was declared **`required: true`**, the check throws before compiling —
+- If the key is **required** (the default), the check throws before compiling —
   for *every* check on the schema (see [Context keys](#context-keys)).
-- Otherwise the referencing condition is treated as **false** — the same rule
-  Warden applies to a targeted condition in a no-target check. That is safe on a
-  grant (no key, no grant), but on a `cannot` it makes the veto *lift*
-  (fail-open), which is why a deny-gating frame should be `required`.
+- If it was declared **`required: false`**, the referencing condition is treated
+  as **false** — the same rule Warden applies to a targeted condition in a
+  no-target check. That is safe on a grant (no key, no grant), but on a `cannot`
+  it makes the veto *lift* (fail-open), which is why only a grant-only frame
+  should be opted out of required.
 
 Supplying the values is covered under
 [Passing context to a check](#passing-context-to-a-check).
@@ -1299,7 +1301,7 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 - `const model` — managed Eloquent model (or `''` for a capability schema)
 - `const schemaKey` — optional schema-key override
 - `#[Ability] const X = '...'` — declare an ability
-- `#[ContextKey(required: false)] const X = '...'` — declare a check-time context key
+- `#[ContextKey] const X = '...'` — declare a check-time context key (required by default; `required: false` to opt out)
 - `#[TargetedCondition]` / `#[GlobalCondition]` methods — declare conditions
 - `protected function implicitRules(): array` — always-on rules
 - `protected function defaultContext(): array` — default check-time context
