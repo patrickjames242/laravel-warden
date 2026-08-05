@@ -42,6 +42,7 @@ final class RuleSetCompiler
         string $ability,
         WardenRuleSet $ruleSet,
         ?string $targetSqlId = null,
+        array $context = [],
     ): Builder {
         $predicate = $query->newQuery();
 
@@ -73,7 +74,7 @@ final class RuleSetCompiler
         }
 
         // Grant side: OR of every can-expression (null => always-true term).
-        $predicate->where(function (Builder $grantGroup) use ($grants, $user, $targetSqlId): void {
+        $predicate->where(function (Builder $grantGroup) use ($grants, $user, $targetSqlId, $context): void {
             foreach ($grants as $index => $grantExpression) {
                 $boolean = $index === 0 ? 'and' : 'or';
 
@@ -83,14 +84,14 @@ final class RuleSetCompiler
                     continue;
                 }
 
-                $this->applyExpression($grantGroup, $grantExpression, $user, $targetSqlId, $boolean, false);
+                $this->applyExpression($grantGroup, $grantExpression, $user, $targetSqlId, $context, $boolean, false);
             }
         });
 
         // Deny side: AND NOT(expression) for each conditional `cannot`.
         foreach ($denies as $denyExpression) {
-            $predicate->where(function (Builder $denyGroup) use ($denyExpression, $user, $targetSqlId): void {
-                $this->applyExpression($denyGroup, $denyExpression, $user, $targetSqlId, 'and', true);
+            $predicate->where(function (Builder $denyGroup) use ($denyExpression, $user, $targetSqlId, $context): void {
+                $this->applyExpression($denyGroup, $denyExpression, $user, $targetSqlId, $context, 'and', true);
             });
         }
 
@@ -115,11 +116,12 @@ final class RuleSetCompiler
         IBooleanExpressionNode $node,
         Authenticatable $user,
         ?string $targetSqlId,
+        array $context,
         string $boolean,
         bool $negate,
     ): void {
         if ($node instanceof NotNode) {
-            $this->applyExpression($parent, $node->operand, $user, $targetSqlId, $boolean, ! $negate);
+            $this->applyExpression($parent, $node->operand, $user, $targetSqlId, $context, $boolean, ! $negate);
 
             return;
         }
@@ -129,16 +131,16 @@ final class RuleSetCompiler
             $childrenAreOr = $node instanceof OrNode;
             $innerSecondBoolean = ($childrenAreOr xor $negate) ? 'or' : 'and';
 
-            $parent->where(function (Builder $group) use ($node, $user, $targetSqlId, $negate, $innerSecondBoolean): void {
-                $this->applyExpression($group, $node->leftSide, $user, $targetSqlId, 'and', $negate);
-                $this->applyExpression($group, $node->rightSide, $user, $targetSqlId, $innerSecondBoolean, $negate);
+            $parent->where(function (Builder $group) use ($node, $user, $targetSqlId, $context, $negate, $innerSecondBoolean): void {
+                $this->applyExpression($group, $node->leftSide, $user, $targetSqlId, $context, 'and', $negate);
+                $this->applyExpression($group, $node->rightSide, $user, $targetSqlId, $context, $innerSecondBoolean, $negate);
             }, null, null, $boolean);
 
             return;
         }
 
         if ($node instanceof ConditionNode) {
-            $this->applyCondition($parent, $node, $user, $targetSqlId, $boolean, $negate);
+            $this->applyCondition($parent, $node, $user, $targetSqlId, $context, $boolean, $negate);
 
             return;
         }
@@ -158,6 +160,7 @@ final class RuleSetCompiler
         ConditionNode $node,
         Authenticatable $user,
         ?string $targetSqlId,
+        array $context,
         string $boolean,
         bool $negate,
     ): void {
@@ -167,6 +170,27 @@ final class RuleSetCompiler
             $parent->whereRaw($negate ? '1 = 1' : '1 = 0', [], $boolean);
 
             return;
+        }
+
+        // Resolve any @context placeholder against the check-time context. A key
+        // that is absent (only ever a non-required key — required keys are enforced
+        // before compilation) makes the condition unevaluable → false, mirroring
+        // the targeted-no-target guard above (and De Morgan-safe under negation).
+        $parameters = [];
+        foreach ($node->parameters as $parameter) {
+            if ($parameter instanceof ContextRef) {
+                if (! array_key_exists($parameter->key, $context)) {
+                    $parent->whereRaw($negate ? '1 = 1' : '1 = 0', [], $boolean);
+
+                    return;
+                }
+
+                $parameters[] = $context[$parameter->key];
+
+                continue;
+            }
+
+            $parameters[] = $parameter;
         }
 
         $existsQuery = $parent->newQuery();
@@ -180,7 +204,7 @@ final class RuleSetCompiler
             $user,
             $existsQuery,
             $targetSqlId,
-            $node->parameters,
+            $parameters,
         );
 
         // A no-target condition may decide the outcome outright.

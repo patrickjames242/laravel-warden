@@ -19,14 +19,15 @@ trait HasWardenSchema
         string|array $abilities,
         Model|string|null $target = null,
         ?Authenticatable $user = null,
-        AbilityMatchMode $matchMode = AbilityMatchMode::ALL
+        AbilityMatchMode $matchMode = AbilityMatchMode::ALL,
+        array $context = []
     ): bool
     {
         /** @var Model&self $model */
         $model = new static;
         $schemaClass = $model->wardenSchema();
 
-        return $schemaClass::userHasAbilities($abilities, $target, $user, $matchMode);
+        return $schemaClass::userHasAbilities($abilities, $target, $user, $matchMode, $context);
     }
 
     /**
@@ -39,29 +40,35 @@ trait HasWardenSchema
     public function hasAbility(
         string|array $abilities,
         ?Authenticatable $user = null,
-        AbilityMatchMode $matchMode = AbilityMatchMode::ALL
+        AbilityMatchMode $matchMode = AbilityMatchMode::ALL,
+        array $context = []
     ): bool
     {
-        return $this->wardenSchema()::userHasAbilities($abilities, $this, $user, $matchMode);
+        return $this->wardenSchema()::userHasAbilities($abilities, $this, $user, $matchMode, $context);
     }
 
     /**
      * @return array<int, string>
      */
-    public static function getUserAbilities(Model|string|null $target = null, ?Authenticatable $user = null): array
+    public static function getUserAbilities(
+        Model|string|null $target = null,
+        ?Authenticatable $user = null,
+        array $context = []
+    ): array
     {
         /** @var Model&self $model */
         $model = new static;
         $schemaClass = $model->wardenSchema();
 
-        return $schemaClass::getUserAbilities($target, $user);
+        return $schemaClass::getUserAbilities($target, $user, $context);
     }
 
     public function scopeHasAbility(
         EloquentBuilder $query,
         string|array $abilities,
         ?Authenticatable $user = null,
-        AbilityMatchMode $matchMode = AbilityMatchMode::ALL
+        AbilityMatchMode $matchMode = AbilityMatchMode::ALL,
+        array $context = []
     ): EloquentBuilder
     {
         $model = $query->getModel();
@@ -79,6 +86,7 @@ trait HasWardenSchema
             targetSqlId: $model->getQualifiedKeyName(),
             abilities: $abilities,
             matchMode: $matchMode,
+            context: $context,
         );
 
         return $query;
@@ -92,7 +100,8 @@ trait HasWardenSchema
         EloquentBuilder $query,
         ?Authenticatable $user = null,
         string $selectedAbilitiesKey = 'abilities',
-        ?array $onlyAbilities = null
+        ?array $onlyAbilities = null,
+        array $context = []
     ): EloquentBuilder
     {
         $model = $query->getModel();
@@ -110,6 +119,7 @@ trait HasWardenSchema
             targetSqlId: $model->getQualifiedKeyName(),
             selectedAbilitiesKey: $selectedAbilitiesKey,
             onlyAbilities: $onlyAbilities,
+            context: $context,
         );
 
         return $query;
@@ -118,7 +128,11 @@ trait HasWardenSchema
     /**
      * @return array<int, string>
      */
-    public function loadAbilities(?Authenticatable $user = null, string $selectedAbilitiesKey = 'abilities'): array
+    public function loadAbilities(
+        ?Authenticatable $user = null,
+        string $selectedAbilitiesKey = 'abilities',
+        array $context = []
+    ): array
     {
         $schemaClass = $this->wardenSchema();
 
@@ -128,7 +142,7 @@ trait HasWardenSchema
             throw new LogicException('loadAbilities requires an authenticated user or an explicit user instance.');
         }
 
-        $abilities = $schemaClass::getUserAbilities($this, $user);
+        $abilities = $schemaClass::getUserAbilities($this, $user, $context);
 
         $this->setAttribute($selectedAbilitiesKey, $abilities);
 

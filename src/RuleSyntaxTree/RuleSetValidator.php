@@ -60,5 +60,16 @@ final class RuleSetValidator
                 sprintf('Condition [%s] is not declared by the schema.', $node->conditionKey)
             );
         }
+
+        $declaredContextKeys = $this->schema::declaredContextKeys();
+
+        foreach ($node->parameters as $parameter) {
+            if ($parameter instanceof ContextRef
+                && ! in_array($parameter->key, $declaredContextKeys, true)) {
+                throw new InvalidArgumentException(
+                    sprintf('Context key [%s] is not declared by the schema.', $parameter->key)
+                );
+            }
+        }
     }
 }

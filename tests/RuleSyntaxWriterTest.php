@@ -2,6 +2,7 @@
 
 use Warden\RuleSyntaxTree\BoundSyntax;
 use Warden\RuleSyntaxTree\ConditionNode;
+use Warden\RuleSyntaxTree\ContextRef;
 use Warden\RuleSyntaxTree\Parsing\WardenParser;
 use Warden\RuleSyntaxTree\WardenRule;
 use Warden\RuleSyntaxTree\WardenRuleSet;
@@ -122,6 +123,34 @@ it('orders bindings left-to-right across the whole set', function () {
         they can edit
         TXT);
     expect($bound->bindings)->toBe(['first', 'second', 'third']);
+});
+
+// -- context references (@context) --------------------------------------------
+
+it('renders a context ref as @context <key>, inline and bound alike', function () {
+    $rule = WardenRule::fromSyntax('if is_teacher(@context academic_year_id) they can view');
+
+    expect($rule->toSyntax())->toBe("if is_teacher(@context academic_year_id)\nthey can view");
+
+    // Bound form: the ref is NOT a runtime value, so it renders the same and
+    // consumes no positional binding.
+    $bound = $rule->toBoundSyntax();
+    expect($bound->syntax)->toBe("if is_teacher(@context academic_year_id)\nthey can view");
+    expect($bound->bindings)->toBe([]);
+});
+
+it('keeps a context ref out of the positional binding stream', function () {
+    $rule = WardenRule::fromSyntax("if is_teacher('x', @context year) they can view");
+
+    $bound = $rule->toBoundSyntax();
+    expect($bound->syntax)->toBe("if is_teacher(?, @context year)\nthey can view");
+    expect($bound->bindings)->toBe(['x']);
+
+    // Re-parsing the bound form restores the same value + ref shape.
+    $reparsed = WardenRule::fromSyntax($bound->syntax, $bound->bindings);
+    expect($reparsed->conditions->parameters[0])->toBe('x');
+    expect($reparsed->conditions->parameters[1])->toBeInstanceOf(ContextRef::class);
+    expect($reparsed->conditions->parameters[1]->key)->toBe('year');
 });
 
 // -- round-trip ---------------------------------------------------------------

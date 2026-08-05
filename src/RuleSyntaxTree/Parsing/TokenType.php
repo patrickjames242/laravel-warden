@@ -24,6 +24,7 @@ enum TokenType
     // Bindings.
     case NAMED_BINDING;  // :name
     case POSITIONAL;     // ?
+    case CONTEXT_REF;    // @context (followed by the key identifier)
 
     // Names and literals.
     case IDENTIFIER; // condition or ability name

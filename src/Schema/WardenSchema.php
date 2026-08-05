@@ -80,11 +80,34 @@ abstract class WardenSchema implements ConditionResolver
         return [];
     }
 
+    /**
+     * Default check-time context for this schema, merged *under* any context
+     * passed explicitly to a check (explicit values win; partial explicit context
+     * is allowed). Override to source the frame from the request/tenant/container
+     * so that param-less entry points — route middleware and the auto-applied
+     * `SelectAbilities` global scope — receive context without a `context:`
+     * argument:
+     *
+     * ```php
+     * protected function defaultContext(): array
+     * {
+     *     return ['workspace_id' => app('tenant')->id];
+     * }
+     * ```
+     *
+     * @return array<string, mixed>
+     */
+    protected function defaultContext(): array
+    {
+        return [];
+    }
+
     public static function userHasAbilities(
         string|array $abilities,
         Model|string|null $target = null,
         ?Authenticatable $user = null,
-        AbilityMatchMode $matchMode = AbilityMatchMode::ALL
+        AbilityMatchMode $matchMode = AbilityMatchMode::ALL,
+        array $context = []
     ): bool
     {
         $user ??= auth()->user();
@@ -98,7 +121,7 @@ abstract class WardenSchema implements ConditionResolver
         $schema = new static;
 
         if ($target === null) {
-            return $schema->getAbilitiesWithoutTarget($user, $abilities, $matchMode) !== [];
+            return $schema->getAbilitiesWithoutTarget($user, $abilities, $matchMode, $context) !== [];
         }
 
         static::assertSupportsTargetedChecks();
@@ -113,6 +136,7 @@ abstract class WardenSchema implements ConditionResolver
             targetSqlId: $model->getQualifiedKeyName(),
             abilities: $abilities,
             matchMode: $matchMode,
+            context: $context,
         )->exists();
     }
 
@@ -121,7 +145,8 @@ abstract class WardenSchema implements ConditionResolver
      */
     public static function getUserAbilities(
         Model|string|null $target = null,
-        ?Authenticatable $user = null
+        ?Authenticatable $user = null,
+        array $context = []
     ): array
     {
         $user ??= auth()->user();
@@ -135,7 +160,7 @@ abstract class WardenSchema implements ConditionResolver
         $schema = new static;
 
         if ($target === null) {
-            return $schema->getAbilitiesWithoutTarget($user);
+            return $schema->getAbilitiesWithoutTarget($user, context: $context);
         }
 
         static::assertSupportsTargetedChecks();
@@ -154,6 +179,7 @@ abstract class WardenSchema implements ConditionResolver
             currentUser: $user,
             query: $model->newQuery()->whereKey($targetId)->getQuery(),
             targetSqlId: $model->getQualifiedKeyName(),
+            context: $context,
         )->first();
         $selectedAbilities = $row['abilities'] ?? null;
 

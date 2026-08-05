@@ -2,6 +2,7 @@
 
 use Warden\RuleSyntaxTree\AndNode;
 use Warden\RuleSyntaxTree\ConditionNode;
+use Warden\RuleSyntaxTree\ContextRef;
 use Warden\RuleSyntaxTree\NotNode;
 use Warden\RuleSyntaxTree\OrNode;
 use Warden\RuleSyntaxTree\WardenRule;
@@ -174,6 +175,47 @@ it('accepts any value type through a binding', function () {
 
     expect($set->rules[0]->conditions->parameters[0])->toBe($object);
 });
+
+// -- Context references (@context) --------------------------------------------
+
+it('parses @context <key> into a symbolic ContextRef, not a value', function () {
+    $set = WardenRuleSet::fromSyntax('timesheets', 'if is_teacher(@context academic_year_id) they can view');
+
+    $params = $set->rules[0]->conditions->parameters;
+    expect($params)->toHaveCount(1);
+    expect($params[0])->toBeInstanceOf(ContextRef::class);
+    expect($params[0]->key)->toBe('academic_year_id');
+});
+
+it('mixes a context ref with literals and bindings in one condition', function () {
+    $set = WardenRuleSet::fromSyntax(
+        'timesheets',
+        "if is_teacher('x', @context year, :b) they can view",
+        ['b' => 42],
+    );
+
+    $params = $set->rules[0]->conditions->parameters;
+    expect($params[0])->toBe('x');
+    expect($params[1])->toBeInstanceOf(ContextRef::class);
+    expect($params[1]->key)->toBe('year');
+    expect($params[2])->toBe(42);
+});
+
+it('exempts a context ref from binding finalize (no "unused binding" error)', function () {
+    // A bare @context ref with an empty bindings array must not trip the
+    // all-bindings-used / mixing checks — it is resolved later, at check time.
+    $set = WardenRuleSet::fromSyntax('timesheets', 'if is_teacher(@context year) they can view');
+
+    expect($set->rules[0]->conditions->parameters[0])->toBeInstanceOf(ContextRef::class);
+});
+
+it('errors on a bad context sigil or a missing key', function (string $syntax, string $needle) {
+    expect(fn () => WardenRuleSet::fromSyntax('timesheets', $syntax))
+        ->toThrow(WardenSyntaxException::class, $needle);
+})->with([
+    'not context'  => ['if is_teacher(@year) they can view', "Expected 'context'"],
+    'missing key'  => ['if is_teacher(@context) they can view', 'Expected a context key'],
+]);
 
 // -- Wildcards ----------------------------------------------------------------
 

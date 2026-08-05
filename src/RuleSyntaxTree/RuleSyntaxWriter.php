@@ -130,6 +130,13 @@ final class RuleSyntaxWriter
 
     private function arg(mixed $value): string
     {
+        // A context ref is a compile-time reference, not a runtime value: it must
+        // render identically in inline and bound modes, and must NOT consume a
+        // positional binding (else the `?` count desyncs on re-parse).
+        if ($value instanceof ContextRef) {
+            return '@context ' . $value->key;
+        }
+
         if ($this->bound) {
             $this->bindings[] = $value;
 

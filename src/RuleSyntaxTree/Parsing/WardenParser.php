@@ -4,6 +4,7 @@ namespace Warden\RuleSyntaxTree\Parsing;
 
 use Warden\RuleSyntaxTree\AndNode;
 use Warden\RuleSyntaxTree\ConditionNode;
+use Warden\RuleSyntaxTree\ContextRef;
 use Warden\RuleSyntaxTree\IBooleanExpressionNode;
 use Warden\RuleSyntaxTree\NotNode;
 use Warden\RuleSyntaxTree\OrNode;
@@ -24,7 +25,8 @@ use Warden\RuleSyntaxTree\WardenSyntaxException;
  *   not      := ('not'|'!') not | primary
  *   primary  := '(' expr ')' | condition
  *   condition:= IDENTIFIER ( '(' (arg (',' arg)*)? ')' )?
- *   arg      := literal | NAMED_BINDING | POSITIONAL
+ *   arg      := literal | NAMED_BINDING | POSITIONAL | context_ref
+ *   context_ref := '@context' IDENTIFIER
  */
 final class WardenParser
 {
@@ -281,8 +283,26 @@ final class WardenParser
             TokenType::NULL => $this->advance()->value,
             TokenType::NAMED_BINDING => $this->bindings->resolveNamed($this->advance()),
             TokenType::POSITIONAL => $this->bindings->resolvePositional($this->advance()),
-            default => throw $this->errorAtCurrent('Expected an argument: a literal or a binding (:name or ?).'),
+            TokenType::CONTEXT_REF => $this->parseContextRef(),
+            default => throw $this->errorAtCurrent('Expected an argument: a literal, a binding (:name or ?), or @context <key>.'),
         };
+    }
+
+    /**
+     * Parse a `@context <key>` reference into a symbolic {@see ContextRef}. It
+     * bypasses {@see BindingState} entirely — it is neither a parse-time named
+     * nor positional binding — so it is exempt from the "all bindings used /
+     * no mixing" checks and is resolved later, at compile time.
+     */
+    private function parseContextRef(): ContextRef
+    {
+        $this->advance(); // consume '@context'
+
+        if (! $this->check(TokenType::IDENTIFIER)) {
+            throw $this->errorAtCurrent("Expected a context key after '@context'.");
+        }
+
+        return new ContextRef($this->advance()->lexeme);
     }
 
     // -- token helpers --------------------------------------------------------

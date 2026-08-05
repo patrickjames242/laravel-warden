@@ -65,6 +65,7 @@ final class Lexer
             $char === '!' => $this->single(TokenType::NOT),
             $char === '?' => $this->single(TokenType::POSITIONAL),
             $char === ':' => $this->scanNamedBinding(),
+            $char === '@' => $this->scanContextRef(),
             $char === "'" => $this->scanString(),
             $this->isDigit($char) => $this->scanNumber(),
             $char === '-' => $this->scanNumber(),
@@ -88,6 +89,32 @@ final class Lexer
         $name = $this->consumeIdentifier();
 
         return new Token(TokenType::NAMED_BINDING, ':' . $name, $startOffset, $startLine, $startCol, $name);
+    }
+
+    private function scanContextRef(): Token
+    {
+        $startOffset = $this->pos;
+        $startLine = $this->line;
+        $startCol = $this->col;
+
+        $this->advance(); // consume '@'
+
+        if ($this->pos >= $this->length || ! $this->isIdentifierStart($this->source[$this->pos])) {
+            throw $this->errorAt("Expected 'context' after '@'.", $startOffset, $startLine, $startCol);
+        }
+
+        $word = $this->consumeIdentifier();
+
+        if ($word !== 'context') {
+            throw $this->errorAt(
+                sprintf("Expected 'context' after '@', got '%s'.", $word),
+                $startOffset,
+                $startLine,
+                $startCol,
+            );
+        }
+
+        return new Token(TokenType::CONTEXT_REF, '@context', $startOffset, $startLine, $startCol);
     }
 
     private function scanString(): Token

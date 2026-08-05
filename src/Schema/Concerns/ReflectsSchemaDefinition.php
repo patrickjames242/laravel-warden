@@ -10,6 +10,7 @@ use ReflectionClassConstant;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Warden\Ability;
+use Warden\ContextKey;
 use Warden\GlobalCondition;
 use Warden\Schema\Conditions\GlobalConditionContext;
 use Warden\Schema\Conditions\TargetedConditionContext;
@@ -243,6 +244,63 @@ trait ReflectsSchemaDefinition
     {
         return collect(static::conditionDefinitions())
             ->first(fn(array $definition): bool => $definition['key'] === $conditionKey);
+    }
+
+    /**
+     * Returns every check-time context key declared by the schema (from
+     * `#[ContextKey]` constants). These are the keys a rule may reference with
+     * `@context <key>` and that callers supply in the `context:` bag.
+     *
+     * @return array<int, string>
+     */
+    public static function declaredContextKeys(): array
+    {
+        return array_map(
+            fn(array $definition): string => $definition['key'],
+            static::contextKeyDefinitions(),
+        );
+    }
+
+    /**
+     * Returns the subset of context keys marked `#[ContextKey(required: true)]`.
+     * A check whose effective context omits any of these is rejected up front.
+     *
+     * @return array<int, string>
+     */
+    public static function requiredContextKeys(): array
+    {
+        return array_values(array_map(
+            fn(array $definition): string => $definition['key'],
+            array_filter(
+                static::contextKeyDefinitions(),
+                fn(array $definition): bool => $definition['required'],
+            ),
+        ));
+    }
+
+    /**
+     * @return array<int, array{key: string, required: bool}>
+     */
+    protected static function contextKeyDefinitions(): array
+    {
+        $reflection = new ReflectionClass(static::class);
+
+        return collect($reflection->getReflectionConstants())
+            ->map(function (ReflectionClassConstant $constant): ?array {
+                $attributes = $constant->getAttributes(ContextKey::class);
+
+                if ($attributes === []) {
+                    return null;
+                }
+
+                return [
+                    'key' => $constant->getValue(),
+                    'required' => $attributes[0]->newInstance()->required,
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
     }
 
     /**

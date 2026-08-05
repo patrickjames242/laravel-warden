@@ -1,0 +1,141 @@
+<?php
+
+require_once __DIR__.'/Support/TestSupport.php';
+
+use Illuminate\Contracts\Database\Query\Builder as BuilderContract;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Warden\Ability;
+use Warden\AbilityMatchMode;
+use Warden\ContextKey;
+use Warden\HasWardenSchema;
+use Warden\RuleSyntaxTree\WardenRuleSet;
+use Warden\Schema\Conditions\TargetedConditionContext;
+use Warden\Schema\WardenSchema;
+use Warden\TargetedCondition;
+
+class ContextDoc extends Model
+{
+    use HasWardenSchema;
+
+    protected $table = 'context_docs';
+    public $incrementing = false;
+    protected $keyType = 'string';
+
+    public function wardenSchema(): string
+    {
+        return ContextDocSchema::class;
+    }
+}
+
+class ContextDocSchema extends WardenSchema
+{
+    public const model = ContextDoc::class;
+
+    #[Ability] public const VIEW = 'view';
+
+    #[ContextKey(required: true)] public const WORKSPACE = 'workspace_id';
+    #[ContextKey] public const AS_OF = 'as_of_date';
+
+    #[TargetedCondition]
+    public function inWorkspace(TargetedConditionContext $c): BuilderContract
+    {
+        [$workspace] = $c->arguments;
+
+        return $c->query->whereRaw('context_docs.workspace_id = ?', [$workspace]);
+    }
+}
+
+// Same schema, but with a default frame — feeds param-less paths and lets a
+// check omit the required key.
+class ContextDocWithDefaults extends ContextDocSchema
+{
+    protected function defaultContext(): array
+    {
+        return ['workspace_id' => 'w-1'];
+    }
+}
+
+beforeEach(function () {
+    Schema::create('context_docs', function ($table) {
+        $table->string('id');
+        $table->string('workspace_id');
+    });
+
+    DB::table('context_docs')->insert([
+        ['id' => 'd1', 'workspace_id' => 'w-1'],
+        ['id' => 'd2', 'workspace_id' => 'w-2'],
+    ]);
+
+    bindWardenRuleSet(WardenRuleSet::fromSyntax(
+        'context_docs',
+        'if in_workspace(@context workspace_id) they can view',
+    ));
+});
+
+// -- reflection ---------------------------------------------------------------
+
+it('discovers declared and required context keys via #[ContextKey]', function () {
+    expect(ContextDocSchema::declaredContextKeys())->toBe(['workspace_id', 'as_of_date']);
+    expect(ContextDocSchema::requiredContextKeys())->toBe(['workspace_id']);
+});
+
+// -- filtering by context -----------------------------------------------------
+
+it('filters a targeted check by the supplied context value', function () {
+    $user = makeWardenTestUser();
+
+    expect(ContextDoc::userHasAbilities('view', 'd1', $user, context: ['workspace_id' => 'w-1']))->toBeTrue();
+    expect(ContextDoc::userHasAbilities('view', 'd1', $user, context: ['workspace_id' => 'w-2']))->toBeFalse();
+});
+
+it('filters a query scope by the supplied context value', function () {
+    $user = makeWardenTestUser();
+
+    $ids = ContextDoc::query()
+        ->hasAbility('view', $user, AbilityMatchMode::ALL, ['workspace_id' => 'w-1'])
+        ->orderBy('id')
+        ->pluck('id')
+        ->all();
+
+    expect($ids)->toBe(['d1']);
+});
+
+// -- required-key enforcement -------------------------------------------------
+
+it('throws when a required context key is missing', function () {
+    $user = makeWardenTestUser();
+
+    expect(fn () => ContextDoc::userHasAbilities('view', 'd1', $user))
+        ->toThrow(InvalidArgumentException::class, 'requires context key(s) [workspace_id]');
+});
+
+it('lets defaultContext() satisfy a required key', function () {
+    $user = makeWardenTestUser();
+
+    // No explicit context: the schema default (w-1) supplies workspace_id.
+    expect(ContextDocWithDefaults::userHasAbilities('view', 'd1', $user))->toBeTrue();
+});
+
+it('lets explicit context win over defaults (partial merge)', function () {
+    $user = makeWardenTestUser();
+
+    // Explicit w-2 overrides the default w-1, so d1 (in w-1) no longer matches.
+    expect(ContextDocWithDefaults::userHasAbilities('view', 'd1', $user, context: ['workspace_id' => 'w-2']))
+        ->toBeFalse();
+});
+
+// -- per-row selection stays flat --------------------------------------------
+
+it('computes a flat per-row ability list under a fixed context', function () {
+    $user = makeWardenTestUser();
+
+    $rows = ContextDoc::query()
+        ->selectAbilities($user, 'abilities', null, ['workspace_id' => 'w-1'])
+        ->orderBy('id')
+        ->get();
+
+    expect(json_decode($rows[0]->abilities, true))->toBe(['view']); // d1, in w-1
+    expect(json_decode($rows[1]->abilities, true))->toBe([]);       // d2, not in w-1
+});

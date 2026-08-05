@@ -28,6 +28,7 @@ full detail, and exactly how you hand rules to the library.
   - [Conditions](#conditions)
   - [Targeted vs. no-target conditions](#targeted-vs-no-target-conditions)
   - [Conditions with parameters](#conditions-with-parameters)
+  - [Context keys](#context-keys)
 - [The rule language](#the-rule-language)
   - [Anatomy of a rule](#anatomy-of-a-rule)
   - [`can` and `cannot`](#can-and-cannot)
@@ -35,6 +36,7 @@ full detail, and exactly how you hand rules to the library.
   - [Operator precedence](#operator-precedence)
   - [Wildcards](#wildcards)
   - [Passing arguments to conditions](#passing-arguments-to-conditions)
+  - [Check-time context (`@context`)](#check-time-context-context)
   - [Whitespace, multiple rules, and reserved words](#whitespace-multiple-rules-and-reserved-words)
   - [Formal grammar](#formal-grammar)
   - [Syntax errors](#syntax-errors)
@@ -48,6 +50,7 @@ full detail, and exactly how you hand rules to the library.
   - [On the model](#on-the-model)
   - [Filtering queries](#filtering-queries)
   - [Per-row abilities](#per-row-abilities)
+  - [Passing context to a check](#passing-context-to-a-check)
   - [Capability (no-target) checks](#capability-no-target-checks)
   - [Match modes](#match-modes)
   - [Route middleware](#route-middleware)
@@ -518,7 +521,7 @@ The distinction is: *does this predicate talk about a specific row?*
   #[GlobalCondition]
   public function isAdmin(GlobalConditionContext $c): bool
   {
-      return (bool) $c->user->is_admin;   // true grants outright, false grants nothing
+      return (bool) $c->user->is_admin;   // true = holds for this user, false = doesn't
   }
   ```
 
@@ -547,6 +550,55 @@ public function inDepartment(TargetedConditionContext $c): Builder
 
 A condition that ignores arguments simply never reads `$c->arguments`.
 
+### Context keys
+
+Some values a rule needs aren't known when the schema is written *or* when the
+resolver builds the rules — they're known only at the moment of the check: the
+current tenant, an academic year, an as-of date, an impersonated user. These are
+**context keys**. Declare each with `#[ContextKey]`, mirroring `#[Ability]` — the
+constant's *value* is the key string; its name is irrelevant to Warden:
+
+```php
+// Loud invariant: no check on this resource resolves without the frame.
+#[ContextKey(required: true)] public const WORKSPACE = 'workspace_id';
+
+// Optional frame: declared so a rule may reference it, but not mandatory.
+#[ContextKey] public const AS_OF = 'as_of_date';
+```
+
+A rule references a context key with `@context <key>` (see
+[Check-time context](#check-time-context-context)); the caller supplies the value
+in a `context:` array at check time (see
+[Passing context to a check](#passing-context-to-a-check)). The value arrives in
+the condition exactly like any other argument, on `$c->arguments`:
+
+```php
+#[TargetedCondition]
+public function inWorkspace(TargetedConditionContext $c): Builder
+{
+    [$workspace] = $c->arguments;   // supplied at the check via @context workspace_id
+    return $c->query->where('documents.workspace_id', $workspace);
+}
+```
+
+**`required: true`** makes the key mandatory: any check on the schema throws
+unless the key is present in the effective context. Use it for a frame that gates
+a `cannot` — a missing optional key silently *lifts* a deny (see
+[Check-time context](#check-time-context-context)), and `required` is what
+forecloses that. Leave a grant-only frame optional.
+
+**`defaultContext()`** supplies defaults so callers may omit a key — and so
+param-less paths (route middleware, the `selectAbilities` global scope) get a
+frame with no `context:` argument. Explicit context passed at the check wins over
+defaults:
+
+```php
+protected function defaultContext(): array
+{
+    return ['workspace_id' => app('tenant')->id];
+}
+```
+
 ---
 
 ## The rule language
@@ -554,6 +606,12 @@ A condition that ignores arguments simply never reads `$c->arguments`.
 This is the heart of Warden. Rules are written as a plain string. You'll
 typically store these strings (per role, per user, per tenant) and load them in
 your resolver.
+
+Throughout, **"they" is the current user** — the one your resolver was asked
+about for this request. A rule set never describes what *everyone* can do; it
+describes what *this* user can do with the resource it's scoped to. So
+`they can approve` means "this user may approve every row of this resource,"
+not "approval is open to all users."
 
 ### Anatomy of a rule
 
@@ -588,15 +646,16 @@ Concretely:
 
 - **A `cannot` is an absolute veto.** `they cannot delete` compiles to "and *not*
   the delete rule's condition." An **unconditional** `they cannot delete` means
-  *no one can ever delete*, full stop — no `can` rule can bring it back.
+  *this user can never delete any row*, full stop — no `can` rule can bring it
+  back.
 - **An ability with no `can` rule is denied.** Silence is not permission.
-- **An unconditional `they can view` grants view to every row.**
+- **An unconditional `they can view` grants this user view of every row.**
 
 ```text
-they can view                 # everyone can view
+they can view                 # this user can view every row
 if is_locked
-they cannot update, delete    # ...but locked rows can never be updated or deleted,
-                              #    even if another rule grants update
+they cannot update, delete    # ...but this user can never update or delete a
+                              #    locked row, even if another rule grants update
 ```
 
 Rule *order does not matter* — the deny-overrides combination is commutative.
@@ -636,18 +695,20 @@ parenthesize. (`&&` and `||` are **not** supported — use `and` / `or`.)
 
 ```text
 if is_admin
-they can *              # grant every ability
+they can *              # this user gets every ability (when they're an admin)
 
 if is_suspended
-they cannot *           # deny every ability (a blanket lockout that wins)
+they cannot *           # this user loses every ability (a lockout that wins)
 ```
 
 `they cannot *` combined with deny-overrides is the idiomatic "kill switch."
 
 ### Passing arguments to conditions
 
-A condition can take arguments in three ways: **inline literals**, **named
-bindings**, and **positional bindings**.
+A condition can take arguments in three ways here — **inline literals**, **named
+bindings**, and **positional bindings** — all resolved *before* compilation. A
+fourth source, **[check-time context](#check-time-context-context)**, is resolved
+later, when the check runs.
 
 **Inline literals** are written directly in the rule. Supported literal types:
 `string` (single-quoted), `int`, `float`, `bool`, `null`.
@@ -694,6 +755,46 @@ Rules for bindings — all enforced at parse time:
   used**. A missing binding, an unused binding, or a positional count mismatch is
   an error.
 
+### Check-time context (`@context`)
+
+The three sources above are all resolved *before* a rule is compiled — literals
+when the rule is authored, bindings when the resolver builds it. Some values are
+known only **when the check runs**: the current tenant, an academic year, an
+as-of date. Warden reaches these with a fourth argument form, `@context <key>`,
+that stays symbolic in the rule and is filled from a `context:` array at check
+time:
+
+```text
+if in_workspace(@context workspace_id) they can view, edit
+```
+
+The key must be [declared on the schema](#context-keys) with `#[ContextKey]` — an
+undeclared `@context` reference is a compile-time error, exactly like an unknown
+condition name. Unlike `:name` / `?` bindings, a `@context` reference is **not**
+subject to the parse-time "every binding used / no mixing" rules — it carries no
+value at parse time. It may sit alongside literals and bindings in one condition,
+and never consumes a positional `?`:
+
+```text
+if scoped_to('projects', @context project_id, :region) they can view
+```
+
+Because the value is pinned once per check, it behaves as an ordinary bound SQL
+parameter — per-row `selectAbilities` stays a flat list and deny-overrides is
+unaffected.
+
+**When the key is absent at check time:**
+
+- If it was declared **`required: true`**, the check throws before compiling —
+  for *every* check on the schema (see [Context keys](#context-keys)).
+- Otherwise the referencing condition is treated as **false** — the same rule
+  Warden applies to a targeted condition in a no-target check. That is safe on a
+  grant (no key, no grant), but on a `cannot` it makes the veto *lift*
+  (fail-open), which is why a deny-gating frame should be `required`.
+
+Supplying the values is covered under
+[Passing context to a check](#passing-context-to-a-check).
+
 ### Whitespace, multiple rules, and reserved words
 
 - **Whitespace is insignificant.** Newlines are cosmetic; an entire rule set can
@@ -735,7 +836,8 @@ and       = not ( "and" not )* ;
 not       = ( "not" | "!" ) not | primary ;
 primary   = "(" expr ")" | condition ;
 condition = IDENTIFIER ( "(" ( arg ( "," arg )* )? ")" )? ;
-arg       = STRING | INT | FLOAT | BOOL | NULL | NAMED_BINDING | POSITIONAL ;
+arg       = STRING | INT | FLOAT | BOOL | NULL | NAMED_BINDING | POSITIONAL | CONTEXT_REF ;
+CONTEXT_REF = "@context" IDENTIFIER ;
 ```
 
 ### Syntax errors
@@ -927,11 +1029,12 @@ WardenRuleSet::fromRules(
 
 ### Implicit rules
 
-A schema can declare rules that are **always in force**, regardless of what the
-resolver returns, by overriding `implicitRules()`. They're merged into every
-resolved rule set before compilation, so they're validated and obey
-deny-overrides exactly like resolver rules. Ideal for baseline guarantees — an
-admin escape hatch, or a universal lockout:
+A schema can declare rules that are **always merged into the rule set**,
+regardless of what the resolver returns, by overriding `implicitRules()`. They're
+added to every resolved rule set before compilation, so they're validated and
+obey deny-overrides exactly like resolver rules — and, like every rule, they're
+still evaluated against the *current* user via their conditions. Ideal for
+baseline guarantees — an admin escape hatch, or a suspension lockout:
 
 ```php
 use Warden\RuleSyntaxTree\WardenRule;
@@ -1049,6 +1152,28 @@ one branch per ability:
 Timesheet::query()->selectAbilities(onlyAbilities: ['update'])->get();
 ```
 
+### Passing context to a check
+
+Every check API takes an optional `context:` array — the values for any
+[`@context` keys](#check-time-context-context) the rules reference. It threads
+through the model helpers, the query scopes, and the capability checks alike:
+
+```php
+// Boolean check:
+Timesheet::userHasAbilities('update', $timesheet, context: ['workspace_id' => $id]);
+
+// Row filtering:
+Timesheet::query()->hasAbility('update', context: ['workspace_id' => $id])->paginate();
+
+// Per-row abilities, evaluated in one fixed frame:
+Timesheet::query()->selectAbilities(context: ['workspace_id' => $id])->get();
+```
+
+Whatever you pass is merged *over* the schema's
+[`defaultContext()`](#context-keys), with explicit values winning. A schema with a
+`required` context key rejects a check that ends up without it — a loud error, so
+a required frame is never silently skipped.
+
 ### Capability (no-target) checks
 
 Not every check is about a row. "Can this user *create* timesheets?" or "can
@@ -1123,10 +1248,11 @@ predicate(ability) =
 
 with these hard edges:
 
-- An **unconditional `cannot`** → `AND NOT(true)` → `1 = 0`: the ability is
-  impossible.
-- **No `can` rule** for the ability → `1 = 0`: denied by default.
-- An **unconditional `can`** → an always-true `1 = 1` term.
+- An **unconditional `cannot`** → `AND NOT(true)` → `1 = 0`: this user can never
+  have the ability, on any row.
+- **No `can` rule** for the ability → `1 = 0`: denied to this user by default.
+- An **unconditional `can`** → an always-true `1 = 1` term: this user has the
+  ability on every row.
 
 Every condition leaf is wrapped as an **`EXISTS`** subquery, which makes it a
 strict boolean: a condition that touches a `NULL` column yields `false`, not SQL's
@@ -1173,8 +1299,10 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 - `const model` — managed Eloquent model (or `''` for a capability schema)
 - `const schemaKey` — optional schema-key override
 - `#[Ability] const X = '...'` — declare an ability
+- `#[ContextKey(required: false)] const X = '...'` — declare a check-time context key
 - `#[TargetedCondition]` / `#[GlobalCondition]` methods — declare conditions
 - `protected function implicitRules(): array` — always-on rules
+- `protected function defaultContext(): array` — default check-time context
 
 **Build rules**
 - `WardenRuleSet::fromSyntax(string $entity, string $syntax, array $bindings = [])`
@@ -1190,11 +1318,12 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 - register in `config/warden.php` → `rule_resolver`, `schemas`
 
 **Check access** — `use Warden\HasWardenSchema` on the model
-- `Model::userHasAbilities($abilities, $target = null, $user = null, $matchMode = ALL): bool`
-- `Model::getUserAbilities($target = null, $user = null): array`
-- `->hasAbility($abilities, $user = null, $matchMode = ALL)` — query scope
-- `->selectAbilities($user = null, $key = 'abilities', ?array $onlyAbilities = null)` — query scope
-- `$model->loadAbilities($user = null)` — attach the ability list to an instance
+- `Model::userHasAbilities($abilities, $target = null, $user = null, $matchMode = ALL, $context = []): bool`
+- `Model::getUserAbilities($target = null, $user = null, $context = []): array`
+- `->hasAbility($abilities, $user = null, $matchMode = ALL, $context = [])` — query scope
+- `->selectAbilities($user = null, $key = 'abilities', ?array $onlyAbilities = null, $context = [])` — query scope
+- `$model->loadAbilities($user = null, $key = 'abilities', $context = [])` — attach the ability list to an instance
+- `context:` — values for the rules' `@context` keys, merged over `defaultContext()`
 - `Warden\AbilityMatchMode::ALL | ANY`
 
 **Middleware** — `Warden\WardenMiddleware`

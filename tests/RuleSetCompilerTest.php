@@ -34,11 +34,16 @@ final class CompilerTestUser implements Authenticatable
  */
 final class FakeConditionResolver implements ConditionResolver
 {
-    private const TARGETED = ['is_teacher' => true, 'is_owner' => true, 'is_admin' => false];
+    private const TARGETED = ['is_teacher' => true, 'is_owner' => true, 'is_admin' => false, 'id_is' => true];
 
     public static function declaredAbilities(): array
     {
         return ['view', 'edit', 'delete', 'publish'];
+    }
+
+    public static function declaredContextKeys(): array
+    {
+        return ['doc_id'];
     }
 
     public function conditionExists(string $name): bool
@@ -56,19 +61,21 @@ final class FakeConditionResolver implements ConditionResolver
         return match ($name) {
             'is_teacher' => $whereClause->whereRaw("{$targetSqlId} = ?", ["teacher:{$user->role}"]),
             'is_owner' => $whereClause->whereRaw("{$targetSqlId} = ?", [$parameters[0]]),
+            // Matches a row whose id equals the (context- or literal-supplied) argument.
+            'id_is' => $whereClause->whereRaw("{$targetSqlId} = ?", [$parameters[0]]),
             'is_admin' => $user->role === 'admin',
             default => throw new RuntimeException("unknown condition {$name}"),
         };
     }
 }
 
-function compileDocIds(string $syntax, string $ability, ?string $role = 'role-1', array $bindings = []): array
+function compileDocIds(string $syntax, string $ability, ?string $role = 'role-1', array $bindings = [], array $context = []): array
 {
     $compiler = new RuleSetCompiler(new FakeConditionResolver);
     $ruleSet = WardenRuleSet::fromSyntax('docs', $syntax, $bindings);
 
     $query = DB::table('docs');
-    $predicate = $compiler->compileAbility(new CompilerTestUser($role), $query, $ability, $ruleSet, 'docs.id');
+    $predicate = $compiler->compileAbility(new CompilerTestUser($role), $query, $ability, $ruleSet, 'docs.id', $context);
     $query->addNestedWhereQuery($predicate);
 
     return $query->orderBy('id')->pluck('id')->all();
@@ -160,6 +167,47 @@ it('forces a targeted condition to false with no target, true under not', functi
     $q2 = DB::table('docs');
     $q2->addNestedWhereQuery($compiler->compileAbility($user, $q2, 'view', $negated, null));
     expect($q2->count())->toBe(3);
+});
+
+// -- @context resolution ------------------------------------------------------
+
+it('resolves a @context value into a condition argument', function () {
+    expect(compileDocIds('if id_is(@context doc_id) they can view', 'view', 'role-1', [], ['doc_id' => 'doc-9']))
+        ->toBe(['doc-9']);
+});
+
+it('soft-falses a grant when a referenced context key is absent', function () {
+    // No context provided: id_is(@context doc_id) is unevaluable → false → no grant.
+    expect(compileDocIds('if id_is(@context doc_id) they can view', 'view'))->toBe([]);
+});
+
+it('lifts a context-gated cannot when the key is absent (fail-open)', function () {
+    // The deny is unevaluable without doc_id, so the veto does not apply and the
+    // unconditional grant stands — the documented reason a deny-gating key should
+    // be declared required.
+    expect(compileDocIds('they can view if id_is(@context doc_id) they cannot view', 'view'))
+        ->toBe(['doc-9', 'other', 'teacher:role-1']);
+
+    // With the key present, the veto subtracts the matching row.
+    expect(compileDocIds('they can view if id_is(@context doc_id) they cannot view', 'view', 'role-1', [], ['doc_id' => 'doc-9']))
+        ->toBe(['other', 'teacher:role-1']);
+});
+
+it('treats a negated absent context condition as true (De Morgan-safe)', function () {
+    // not id_is(@context doc_id) with doc_id absent → not(false) → true → all rows.
+    expect(compileDocIds('if not id_is(@context doc_id) they can view', 'view'))
+        ->toBe(['doc-9', 'other', 'teacher:role-1']);
+});
+
+it('rejects a rule referencing an undeclared context key', function () {
+    $validator = new RuleSetValidator(new FakeConditionResolver);
+
+    expect(fn () => $validator->validate(WardenRuleSet::fromSyntax('docs', 'if id_is(@context nope) they can view')))
+        ->toThrow(InvalidArgumentException::class, 'Context key [nope]');
+
+    // A declared key passes silently.
+    $validator->validate(WardenRuleSet::fromSyntax('docs', 'if id_is(@context doc_id) they can view'));
+    expect(true)->toBeTrue();
 });
 
 it('validates unknown ability and condition names', function () {

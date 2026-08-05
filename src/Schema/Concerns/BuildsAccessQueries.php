@@ -4,6 +4,7 @@ namespace Warden\Schema\Concerns;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Database\Query\Builder;
+use InvalidArgumentException;
 use RuntimeException;
 use Warden\AbilityMatchMode;
 use Warden\RuleResolutionContext;
@@ -30,7 +31,8 @@ trait BuildsAccessQueries
         Builder $query,
         string $targetSqlId,
         string|array $abilities,
-        AbilityMatchMode $matchMode = AbilityMatchMode::ALL
+        AbilityMatchMode $matchMode = AbilityMatchMode::ALL,
+        array $context = []
     ): Builder
     {
         $abilities = $this->normalizeAbilities($abilities);
@@ -39,6 +41,7 @@ trait BuildsAccessQueries
             return $query;
         }
 
+        $context = $this->resolveEffectiveContext($context);
         $ruleSet = $this->resolveRuleSet($currentUser);
 
         return $query->where(function (Builder $outerWhereClause) use (
@@ -48,6 +51,7 @@ trait BuildsAccessQueries
             $query,
             $targetSqlId,
             $ruleSet,
+            $context,
         ) {
             foreach ($abilities as $ability) {
                 $abilityConditionQuery = $this->buildAbilityConditionQuery(
@@ -56,6 +60,7 @@ trait BuildsAccessQueries
                     targetSqlId: $targetSqlId,
                     ability: $ability,
                     ruleSet: $ruleSet,
+                    context: $context,
                 );
 
                 if ($matchMode === AbilityMatchMode::ALL) {
@@ -86,7 +91,8 @@ trait BuildsAccessQueries
         Builder $query,
         string $targetSqlId,
         string $selectedAbilitiesKey = 'abilities',
-        ?array $onlyAbilities = null
+        ?array $onlyAbilities = null,
+        array $context = []
     ): Builder
     {
         if ($query->columns === null) {
@@ -101,11 +107,14 @@ trait BuildsAccessQueries
             return $query->selectRaw("'[]' as {$selectedAbilitiesKey}");
         }
 
+        $context = $this->resolveEffectiveContext($context);
+
         $abilitySelectQuery = $this->buildAvailableAbilitiesQuery(
             currentUser: $currentUser,
             query: $query,
             abilities: $abilities,
-            targetSqlId: $targetSqlId
+            targetSqlId: $targetSqlId,
+            context: $context
         );
 
         /* The JSON aggregate function differs per driver; default to an empty
@@ -146,7 +155,8 @@ trait BuildsAccessQueries
     public function getAbilitiesWithoutTarget(
         Authenticatable $currentUser,
         string|array|null $abilities = null,
-        AbilityMatchMode $matchMode = AbilityMatchMode::ANY
+        AbilityMatchMode $matchMode = AbilityMatchMode::ANY,
+        array $context = []
     ): array
     {
         $requestedAbilities = $abilities === null
@@ -156,6 +166,8 @@ trait BuildsAccessQueries
         if ($requestedAbilities === []) {
             return [];
         }
+
+        $context = $this->resolveEffectiveContext($context);
 
         /* A connection to evaluate the ability predicates on (rule-set lookup
            itself is the resolver's job, on its own connection). No-target
@@ -168,7 +180,8 @@ trait BuildsAccessQueries
         $allowedAbilityQuery = $this->buildAvailableAbilitiesQuery(
             currentUser: $currentUser,
             query: $baseQuery,
-            abilities: $requestedAbilities
+            abilities: $requestedAbilities,
+            context: $context
         );
 
         $allowedAbilities = $baseQuery->newQuery()
@@ -227,7 +240,8 @@ trait BuildsAccessQueries
         Authenticatable $currentUser,
         Builder $query,
         array $abilities,
-        ?string $targetSqlId = null
+        ?string $targetSqlId = null,
+        array $context = []
     ): Builder
     {
         $abilitySelectQuery = null;
@@ -243,6 +257,7 @@ trait BuildsAccessQueries
                 targetSqlId: $targetSqlId,
                 ability: $ability,
                 ruleSet: $ruleSet,
+                context: $context,
             );
 
             $singleAbilitySelectQuery->where(
@@ -265,7 +280,8 @@ trait BuildsAccessQueries
         Builder $query,
         string $ability,
         WardenRuleSet $ruleSet,
-        ?string $targetSqlId = null
+        ?string $targetSqlId = null,
+        array $context = []
     ): Builder
     {
         return $this->compiler()->compileAbility(
@@ -274,6 +290,35 @@ trait BuildsAccessQueries
             $ability,
             $ruleSet,
             $targetSqlId,
+            $context,
         );
+    }
+
+    /**
+     * Merge the explicitly-passed context over the schema's {@see defaultContext},
+     * then enforce that every required context key is present. Explicit values win
+     * over defaults; partial explicit context is allowed. Throws when a
+     * `#[ContextKey(required: true)]` key is missing from the effective context —
+     * for every check on the schema, so a required frame can never be silently
+     * skipped (which would lift a context-gated `cannot`).
+     *
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    protected function resolveEffectiveContext(array $context): array
+    {
+        $effective = array_merge($this->defaultContext(), $context);
+
+        $missing = array_values(array_diff(static::requiredContextKeys(), array_keys($effective)));
+
+        if ($missing !== []) {
+            throw new InvalidArgumentException(sprintf(
+                'Schema [%s] requires context key(s) [%s]; supply them at the check or via defaultContext().',
+                static::class,
+                implode(', ', $missing),
+            ));
+        }
+
+        return $effective;
     }
 }
