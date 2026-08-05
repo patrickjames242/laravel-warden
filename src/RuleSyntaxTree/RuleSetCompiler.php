@@ -205,6 +205,7 @@ final class RuleSetCompiler
             $existsQuery,
             $targetSqlId,
             $parameters,
+            $context,
         );
 
         // A no-target condition may decide the outcome outright.

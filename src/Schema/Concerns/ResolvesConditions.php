@@ -27,13 +27,15 @@ trait ResolvesConditions
      * returned for convenience.
      *
      * @param array<int, mixed> $arguments The resolved DSL arguments for the condition.
+     * @param array<string, mixed> $context The effective check-time context bag.
      */
     public function applyConditionFilter(
         string $conditionKey,
         Authenticatable $currentUser,
         Builder $whereClause,
         ?string $targetSqlId = null,
-        array $arguments = []
+        array $arguments = [],
+        array $context = []
     ): mixed
     {
         $conditionDefinition = static::conditionDefinitionForKey($conditionKey);
@@ -53,12 +55,12 @@ trait ResolvesConditions
                 );
             }
 
-            $context = new TargetedConditionContext($currentUser, $whereClause, $targetSqlId, $arguments);
+            $conditionContext = new TargetedConditionContext($currentUser, $whereClause, $targetSqlId, $arguments, $context);
         } else {
-            $context = new GlobalConditionContext($currentUser, $whereClause, $arguments);
+            $conditionContext = new GlobalConditionContext($currentUser, $whereClause, $arguments, $context);
         }
 
-        return $this->{$methodName}($context);
+        return $this->{$methodName}($conditionContext);
     }
 
     // -- ConditionResolver ----------------------------------------------------
@@ -80,10 +82,11 @@ trait ResolvesConditions
         Authenticatable $user,
         \Illuminate\Database\Query\Builder $whereClause,
         ?string $targetSqlId,
-        array $parameters
+        array $parameters,
+        array $context = []
     ): \Illuminate\Database\Query\Builder|bool
     {
-        return $this->applyConditionFilter($conditionKey, $user, $whereClause, $targetSqlId, $parameters);
+        return $this->applyConditionFilter($conditionKey, $user, $whereClause, $targetSqlId, $parameters, $context);
     }
 
     /**

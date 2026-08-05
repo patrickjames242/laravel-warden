@@ -28,6 +28,8 @@ interface ConditionResolver extends SchemaVocabulary
      * outright (a true/false no-target condition).
      *
      * @param array<int, mixed> $parameters The resolved DSL arguments.
+     * @param array<string, mixed> $context The effective check-time context,
+     *   exposed to every condition (regardless of `@context` usage).
      */
     public function applyCondition(
         string $conditionKey,
@@ -35,5 +37,6 @@ interface ConditionResolver extends SchemaVocabulary
         Builder $whereClause,
         ?string $targetSqlId,
         array $parameters,
+        array $context = [],
     ): Builder|bool;
 }

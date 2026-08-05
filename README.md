@@ -581,6 +581,25 @@ public function inWorkspace(TargetedConditionContext $c): Builder
 }
 ```
 
+Every condition **also** receives the full effective context on `$c->context`,
+whether or not the rule passed a value via `@context`. Reach into it directly when
+a condition is inherently tied to the frame — then the rule needn't mention the
+key at all:
+
+```php
+#[TargetedCondition]
+public function inCurrentWorkspace(TargetedConditionContext $c): Builder
+{
+    // Rule is just `if in_current_workspace they can view` — no @context needed.
+    return $c->query->where('documents.workspace_id', $c->context['workspace_id']);
+}
+```
+
+Two styles, same value. `@context` threads a key into `$c->arguments` positionally
+(and soft-falses the condition when an *optional* key is missing); `$c->context`
+hands every condition the whole bag to read however it likes. Pick whichever makes
+your rules read the way you want.
+
 **Keys are required by default:** any check on the schema throws unless the key
 is present in the effective context. Opt out with
 **`#[ContextKey(required: false)]`** only for a frame that never gates a `cannot`
@@ -793,6 +812,12 @@ unaffected.
   no-target check. That is safe on a grant (no key, no grant), but on a `cannot`
   it makes the veto *lift* (fail-open), which is why only a grant-only frame
   should be opted out of required.
+
+`@context` is one of two ways a condition gets a context value; the other is
+reading the ambient `$c->context` bag directly (see [Context keys](#context-keys)),
+which every condition receives regardless of what the rule passes. The
+distinguishing behavior of `@context` is the automatic soft-false above — a
+condition that reads `$c->context` itself always runs and decides for itself.
 
 Supplying the values is covered under
 [Passing context to a check](#passing-context-to-a-check).

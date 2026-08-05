@@ -45,6 +45,13 @@ class ContextDocSchema extends WardenSchema
 
         return $c->query->whereRaw('context_docs.workspace_id = ?', [$workspace]);
     }
+
+    // Reads the ambient context bag directly — no @context argument in the rule.
+    #[TargetedCondition]
+    public function currentWorkspace(TargetedConditionContext $c): BuilderContract
+    {
+        return $c->query->whereRaw('context_docs.workspace_id = ?', [$c->context['workspace_id'] ?? null]);
+    }
 }
 
 // Same schema, but with a default frame — feeds param-less paths and lets a
@@ -100,6 +107,17 @@ it('filters a query scope by the supplied context value', function () {
         ->all();
 
     expect($ids)->toBe(['d1']);
+});
+
+it('lets a condition read the context bag directly, without @context in the rule', function () {
+    $user = makeWardenTestUser();
+
+    // The rule names current_workspace with no arguments; the condition reaches
+    // into $c->context itself.
+    bindWardenRuleSet(WardenRuleSet::fromSyntax('context_docs', 'if current_workspace they can view'));
+
+    expect(ContextDoc::userHasAbilities('view', 'd2', $user, context: ['workspace_id' => 'w-2']))->toBeTrue();
+    expect(ContextDoc::userHasAbilities('view', 'd1', $user, context: ['workspace_id' => 'w-2']))->toBeFalse();
 });
 
 // -- required-key enforcement -------------------------------------------------

@@ -7,22 +7,28 @@ use Illuminate\Contracts\Database\Query\Builder;
 
 /**
  * The evaluation context passed to a `#[GlobalCondition]` method: the current
- * user, the where-clause builder the condition may constrain, and any resolved
- * DSL arguments.
+ * user, the where-clause builder the condition may constrain, the resolved DSL
+ * arguments, and the check-time context bag.
  *
  * There is no target row — a global condition is about the user or the ambient
  * context, not a specific record. It may mutate the query and return it, or
  * short-circuit by returning a boolean.
+ *
+ * `context` is the effective check-time context (after `defaultContext()` merge),
+ * available whether or not the rule passed a value via `@context`. Read it
+ * directly for an ambient frame: `$c->context['tenant_id']`.
  */
 final readonly class GlobalConditionContext
 {
     /**
      * @param array<int, mixed> $arguments The resolved DSL arguments.
+     * @param array<string, mixed> $context The effective check-time context.
      */
     public function __construct(
         public Authenticatable $user,
         public Builder $query,
         public array $arguments = [],
+        public array $context = [],
     ) {
     }
 }

@@ -35,7 +35,7 @@ final class BuilderFakeResolver implements ConditionResolver
     public function conditionExists(string $name): bool { return $name === 'is_teacher'; }
     public function conditionIsTargeted(string $name): bool { return true; }
 
-    public function applyCondition(string $name, Authenticatable $user, Builder $whereClause, ?string $targetSqlId, array $parameters): Builder|bool
+    public function applyCondition(string $name, Authenticatable $user, Builder $whereClause, ?string $targetSqlId, array $parameters, array $context = []): Builder|bool
     {
         return $whereClause->whereRaw("{$targetSqlId} = ?", ["teacher:{$user->role}"]);
     }

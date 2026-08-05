@@ -34,7 +34,7 @@ final class CompilerTestUser implements Authenticatable
  */
 final class FakeConditionResolver implements ConditionResolver
 {
-    private const TARGETED = ['is_teacher' => true, 'is_owner' => true, 'is_admin' => false, 'id_is' => true];
+    private const TARGETED = ['is_teacher' => true, 'is_owner' => true, 'is_admin' => false, 'id_is' => true, 'ctx_id_is' => true];
 
     public static function declaredAbilities(): array
     {
@@ -56,13 +56,15 @@ final class FakeConditionResolver implements ConditionResolver
         return self::TARGETED[$name] ?? false;
     }
 
-    public function applyCondition(string $name, Authenticatable $user, Builder $whereClause, ?string $targetSqlId, array $parameters): Builder|bool
+    public function applyCondition(string $name, Authenticatable $user, Builder $whereClause, ?string $targetSqlId, array $parameters, array $context = []): Builder|bool
     {
         return match ($name) {
             'is_teacher' => $whereClause->whereRaw("{$targetSqlId} = ?", ["teacher:{$user->role}"]),
             'is_owner' => $whereClause->whereRaw("{$targetSqlId} = ?", [$parameters[0]]),
             // Matches a row whose id equals the (context- or literal-supplied) argument.
             'id_is' => $whereClause->whereRaw("{$targetSqlId} = ?", [$parameters[0]]),
+            // Reads the ambient context bag directly (no @context arg in the rule).
+            'ctx_id_is' => $whereClause->whereRaw("{$targetSqlId} = ?", [$context['doc_id'] ?? '__missing__']),
             'is_admin' => $user->role === 'admin',
             default => throw new RuntimeException("unknown condition {$name}"),
         };
@@ -174,6 +176,15 @@ it('forces a targeted condition to false with no target, true under not', functi
 it('resolves a @context value into a condition argument', function () {
     expect(compileDocIds('if id_is(@context doc_id) they can view', 'view', 'role-1', [], ['doc_id' => 'doc-9']))
         ->toBe(['doc-9']);
+});
+
+it('exposes the whole context bag to every condition automatically', function () {
+    // ctx_id_is reads $c->context['doc_id'] directly — no @context in the rule.
+    expect(compileDocIds('if ctx_id_is they can view', 'view', 'role-1', [], ['doc_id' => 'doc-9']))
+        ->toBe(['doc-9']);
+
+    // With no context supplied, the condition still runs; it just sees no value.
+    expect(compileDocIds('if ctx_id_is they can view', 'view'))->toBe([]);
 });
 
 it('soft-falses a grant when a referenced context key is absent', function () {
