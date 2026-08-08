@@ -1,4 +1,4 @@
-# Laravel Warden
+# Laravel Warrant
 
 Schema-based authorization for Laravel that compiles a small, human-readable
 rule language **directly into SQL** — so "what can this user do?" and
@@ -11,8 +11,8 @@ they can view, update
 they cannot delete
 ```
 
-That block is a real, complete Warden rule. Warden turns it into a `WHERE`
-clause. This README explains the problem Warden solves, the language above in
+That block is a real, complete Warrant rule. Warrant turns it into a `WHERE`
+clause. This README explains the problem Warrant solves, the language above in
 full detail, and exactly how you hand rules to the library.
 
 ---
@@ -20,7 +20,7 @@ full detail, and exactly how you hand rules to the library.
 ## Table of contents
 
 - [The problem](#the-problem)
-- [How Warden thinks about authorization](#how-warden-thinks-about-authorization)
+- [How Warrant thinks about authorization](#how-warrant-thinks-about-authorization)
 - [Installation](#installation)
 - [A complete example](#a-complete-example)
 - [Schemas: the vocabulary of a resource](#schemas-the-vocabulary-of-a-resource)
@@ -40,7 +40,7 @@ full detail, and exactly how you hand rules to the library.
   - [Whitespace, multiple rules, and reserved words](#whitespace-multiple-rules-and-reserved-words)
   - [Formal grammar](#formal-grammar)
   - [Syntax errors](#syntax-errors)
-- [Providing rules to Warden](#providing-rules-to-warden)
+- [Providing rules to Warrant](#providing-rules-to-warrant)
   - [The `RuleResolver`](#the-ruleresolver)
   - [Building a rule set](#building-a-rule-set)
   - [Building rules programmatically](#building-rules-programmatically)
@@ -146,7 +146,7 @@ And in every one of these, **the rule is code**. Want managers to approve
 timesheets in their department? That's a deploy. You can't store it per role or
 per tenant, can't let an admin screen define it, can't audit it as data.
 
-### The same thing in Warden
+### The same thing in Warrant
 
 Write the rule once, as data:
 
@@ -166,18 +166,18 @@ resolves. A schema declares the vocabulary and teaches every condition how to
 emit SQL:
 
 ```php
-namespace App\Warden;
+namespace App\Warrant;
 
 use App\Models\Timesheet;
 use Illuminate\Contracts\Database\Query\Builder;
-use Warden\Ability;
-use Warden\GlobalCondition;
-use Warden\Schema\Conditions\GlobalConditionContext;
-use Warden\Schema\Conditions\TargetedConditionContext;
-use Warden\Schema\WardenSchema;
-use Warden\TargetedCondition;
+use Warrant\Ability;
+use Warrant\GlobalCondition;
+use Warrant\Schema\Conditions\GlobalConditionContext;
+use Warrant\Schema\Conditions\TargetedConditionContext;
+use Warrant\Schema\WarrantSchema;
+use Warrant\TargetedCondition;
 
-class TimesheetSchema extends WardenSchema
+class TimesheetSchema extends WarrantSchema
 {
     public const model = Timesheet::class;
 
@@ -221,7 +221,7 @@ Each condition is written once, in PHP, and every rule that names it — in any
 tenant, role, or admin-defined policy — reuses that same SQL. The rules stay
 data; the schema is the only code.
 
-Warden compiles it to SQL, so one rule set answers all three questions —
+Warrant compiles it to SQL, so one rule set answers all three questions —
 consistently, because there's only one source of truth:
 
 ```php
@@ -235,23 +235,23 @@ Timesheet::query()->selectAbilities()->get();   // each row ->abilities = ['view
 $timesheet->hasAbility('update');
 ```
 
-And notice what's *missing*: Warden never told you where those rules live.
+And notice what's *missing*: Warrant never told you where those rules live.
 Unlike laravel-permission or Bouncer — which own a set of tables and expect
-permissions to be stored their way — Warden doesn't store anything. It doesn't
+permissions to be stored their way — Warrant doesn't store anything. It doesn't
 care whether you keep rules in a database, generate them on the fly from a
 settings screen, read them off a JWT claim, or hardcode them for a plan tier.
-The *only* thing Warden asks is that a **resolver** hand back the rules for the
+The *only* thing Warrant asks is that a **resolver** hand back the rules for the
 current request:
 
 ```php
 class DatabaseRuleResolver implements RuleResolver
 {
-    public function resolve(RuleResolutionContext $context): WardenRuleSet
+    public function resolve(RuleResolutionContext $context): WarrantRuleSet
     {
         if ($context->schemaKey === 'timesheets'){
             // However you want to produce the rules — this is entirely yours:
             if ($context->user->is_manager) {
-                return WardenRuleSet::fromSyntax(
+                return WarrantRuleSet::fromSyntax(
                     $context->schemaKey,
                     'if is_self or manages_department(:dept) they can update
                      if is_locked and not is_admin they cannot update
@@ -259,7 +259,7 @@ class DatabaseRuleResolver implements RuleResolver
                     bindings: ['dept' => $context->user->department],
                 );
             } else {
-                return WardenRuleSet::fromSyntax(
+                return WarrantRuleSet::fromSyntax(
                     $context->schemaKey,
                     "if is_self they can update",
                 );
@@ -270,45 +270,45 @@ class DatabaseRuleResolver implements RuleResolver
 }
 ```
 
-Fetch it from a table, build it from config, compose it per tenant — Warden
+Fetch it from a table, build it from config, compose it per tenant — Warrant
 picks up wherever your resolver leaves off and compiles the result to SQL.
 
-You point Warden at your resolver and register your schemas in
-`config/warden.php`:
+You point Warrant at your resolver and register your schemas in
+`config/warrant.php`:
 
 ```php
-'rule_resolver' => App\Warden\DatabaseRuleResolver::class,
-'schemas'       => [App\Warden\TimesheetSchema::class],
+'rule_resolver' => App\Warrant\DatabaseRuleResolver::class,
+'schemas'       => [App\Warrant\TimesheetSchema::class],
 ```
 
 The rest of this README is how that works.
 
 ---
 
-## How Warden thinks about authorization
+## How Warrant thinks about authorization
 
-Warden splits authorization into three separate things. Keeping them separate is
+Warrant splits authorization into three separate things. Keeping them separate is
 the whole idea:
 
 | Piece | What it is | Who writes it |
 |---|---|---|
 | **Schema** | The *vocabulary* for one resource: the abilities that exist (`view`, `approve`, …) and the conditions a rule may test (`is_self`, `is_manager`, …). Conditions know how to emit SQL. | You, in a PHP class |
-| **Rules** | The *policy itself*, written in Warden's rule language as a plain string (e.g. `if is_self they can view`). Rules reference the schema's vocabulary. | Stored as data — a DB table, config, JWT claims, wherever |
+| **Rules** | The *policy itself*, written in Warrant's rule language as a plain string (e.g. `if is_self they can view`). Rules reference the schema's vocabulary. | Stored as data — a DB table, config, JWT claims, wherever |
 | **Resolver** | The glue that, at request time, produces the rules that apply to *this* user for *this* resource. | You, one small class |
 
 A **schema is not a policy.** It doesn't decide anything — it only declares what
 words the language may use. The actual decisions live in the rules, which your
-**resolver** supplies. Warden compiles those rules, validated against the schema,
+**resolver** supplies. Warrant compiles those rules, validated against the schema,
 into SQL.
 
 ```text
        your data (roles, grants)                    request-time
                 │                                         │
                 ▼                                         ▼
-        RuleResolver ──▶ WardenRuleSet ──▶ RuleSetCompiler ──▶ SQL WHERE / column
+        RuleResolver ──▶ WarrantRuleSet ──▶ RuleSetCompiler ──▶ SQL WHERE / column
                                      ▲                    │
                                      │                    │ validated against
-                              WardenSchema ───────────────┘
+                              WarrantSchema ───────────────┘
                           (abilities + conditions)
 ```
 
@@ -317,17 +317,17 @@ into SQL.
 ## Installation
 
 ```bash
-composer require patrickhanna/laravel-warden
+composer require patrickhanna/laravel-warrant
 ```
 
 The service provider auto-registers. Publish the config if you want to edit it in
 place:
 
 ```bash
-php artisan vendor:publish --tag=warden-config
+php artisan vendor:publish --tag=warrant-config
 ```
 
-Requirements: PHP 8.2+, Laravel 11 or 12. Supported drivers for the SQL Warden
+Requirements: PHP 8.2+, Laravel 11 or 12. Supported drivers for the SQL Warrant
 generates: PostgreSQL, MySQL/MariaDB, and SQLite.
 
 ---
@@ -340,18 +340,18 @@ each.
 **1. The schema** — declares the vocabulary for timesheets:
 
 ```php
-namespace App\Warden;
+namespace App\Warrant;
 
 use App\Models\Timesheet;
 use Illuminate\Contracts\Database\Query\Builder;
-use Warden\Ability;
-use Warden\GlobalCondition;
-use Warden\Schema\Conditions\GlobalConditionContext;
-use Warden\Schema\Conditions\TargetedConditionContext;
-use Warden\Schema\WardenSchema;
-use Warden\TargetedCondition;
+use Warrant\Ability;
+use Warrant\GlobalCondition;
+use Warrant\Schema\Conditions\GlobalConditionContext;
+use Warrant\Schema\Conditions\TargetedConditionContext;
+use Warrant\Schema\WarrantSchema;
+use Warrant\TargetedCondition;
 
-class TimesheetSchema extends WardenSchema
+class TimesheetSchema extends WarrantSchema
 {
     public const model = Timesheet::class;
 
@@ -390,18 +390,18 @@ if in_department(?, ?) they can view, approve
 if is_admin they can *
 ```
 
-**3. The resolver** — hands those rules to Warden for the current user:
+**3. The resolver** — hands those rules to Warrant for the current user:
 
 ```php
-namespace App\Warden;
+namespace App\Warrant;
 
-use Warden\RuleResolutionContext;
-use Warden\RuleResolver;
-use Warden\RuleSyntaxTree\WardenRuleSet;
+use Warrant\RuleResolutionContext;
+use Warrant\RuleResolver;
+use Warrant\RuleSyntaxTree\WarrantRuleSet;
 
 class DatabaseRuleResolver implements RuleResolver
 {
-    public function resolve(RuleResolutionContext $context): WardenRuleSet
+    public function resolve(RuleResolutionContext $context): WarrantRuleSet
     {
         // Look up the raw rule string + any binding values for this user/resource.
         [$syntax, $bindings] = MyRuleStore::for(
@@ -409,16 +409,16 @@ class DatabaseRuleResolver implements RuleResolver
             resource: $context->schemaKey, // 'timesheets'
         );
 
-        return WardenRuleSet::fromSyntax($context->schemaKey, $syntax, $bindings);
+        return WarrantRuleSet::fromSyntax($context->schemaKey, $syntax, $bindings);
     }
 }
 ```
 
-**4. Wire it up** (`config/warden.php`) and use it:
+**4. Wire it up** (`config/warrant.php`) and use it:
 
 ```php
-'rule_resolver' => App\Warden\DatabaseRuleResolver::class,
-'schemas' => [App\Warden\TimesheetSchema::class],
+'rule_resolver' => App\Warrant\DatabaseRuleResolver::class,
+'schemas' => [App\Warrant\TimesheetSchema::class],
 ```
 
 ```php
@@ -437,12 +437,12 @@ $rows->first()->abilities; // e.g. ['view', 'update']
 
 ## Schemas: the vocabulary of a resource
 
-A schema is an `abstract class WardenSchema` subclass, one per resource. It
+A schema is an `abstract class WarrantSchema` subclass, one per resource. It
 declares two things: the **abilities** that exist, and the **conditions** a rule
 may test. It is registered against a model via the `model` constant.
 
 ```php
-class TimesheetSchema extends WardenSchema
+class TimesheetSchema extends WarrantSchema
 {
     public const model = Timesheet::class;   // the Eloquent model this governs
     // public const schemaKey = 'timesheets'; // optional override
@@ -459,7 +459,7 @@ that only answer no-target checks (see [capability checks](#capability-no-target
 
 Abilities are the verbs a rule can grant or deny. Declare each as a class
 constant marked `#[Ability]`. The constant's **value** is the ability name used
-in rules; the constant's *name* is irrelevant to Warden.
+in rules; the constant's *name* is irrelevant to Warrant.
 
 ```php
 #[Ability] public const VIEW    = 'view';
@@ -471,8 +471,8 @@ TimesheetSchema::declaredAbilities(); // ['view', 'approve', ...]
 ```
 
 A rule that names an ability the schema doesn't declare is rejected at compile
-time (see [validation](#how-it-compiles-to-sql)). Warden ships a
-`Warden\StandardAbilities` helper with common names (`VIEW`, `CREATE`, `UPDATE`,
+time (see [validation](#how-it-compiles-to-sql)). Warrant ships a
+`Warrant\StandardAbilities` helper with common names (`VIEW`, `CREATE`, `UPDATE`,
 `DELETE`, `ARCHIVE`) if you want a shared vocabulary.
 
 ### Conditions
@@ -527,7 +527,7 @@ The distinction is: *does this predicate talk about a specific row?*
 
 Why the split matters: some checks (**capability checks** and
 `getAbilitiesWithoutTarget`) run with *no row*. In that context a targeted
-condition can't be evaluated, so Warden treats it as **false** (and therefore
+condition can't be evaluated, so Warrant treats it as **false** (and therefore
 `not <targeted>` as **true**). Global conditions still evaluate normally.
 
 > **Values are always bound.** Whatever you pass into `whereRaw`, `whereIn`,
@@ -556,7 +556,7 @@ Some values a rule needs aren't known when the schema is written *or* when the
 resolver builds the rules — they're known only at the moment of the check: the
 current tenant, an academic year, an as-of date, an impersonated user. These are
 **context keys**. Declare each with `#[ContextKey]`, mirroring `#[Ability]` — the
-constant's *value* is the key string; its name is irrelevant to Warden:
+constant's *value* is the key string; its name is irrelevant to Warrant:
 
 ```php
 // Required by default: no check on this resource resolves without the frame.
@@ -623,7 +623,7 @@ protected function defaultContext(): array
 
 ## The rule language
 
-This is the heart of Warden. Rules are written as a plain string. You'll
+This is the heart of Warrant. Rules are written as a plain string. You'll
 typically store these strings (per role, per user, per tenant) and load them in
 your resolver.
 
@@ -655,7 +655,7 @@ clauses.
 
 ### `can` and `cannot`
 
-Warden combines grants and denials with **deny-overrides**. For a given ability,
+Warrant combines grants and denials with **deny-overrides**. For a given ability,
 the compiled predicate is:
 
 ```text
@@ -747,7 +747,7 @@ binding.
 anywhere in the string (even across rules), and the array order is irrelevant.
 
 ```php
-WardenRuleSet::fromSyntax('timesheets', <<<'RULES'
+WarrantRuleSet::fromSyntax('timesheets', <<<'RULES'
     if is_specific_user(:uid) they can view
     if delegated_to(:uid) they can approve
     RULES,
@@ -759,7 +759,7 @@ WardenRuleSet::fromSyntax('timesheets', <<<'RULES'
 string from a flat array:
 
 ```php
-WardenRuleSet::fromSyntax('timesheets',
+WarrantRuleSet::fromSyntax('timesheets',
     'if in_department(?, ?) they can view',
     ['sales', 'eng'],            // ? ? -> 'sales', 'eng'
 );
@@ -780,7 +780,7 @@ Rules for bindings — all enforced at parse time:
 The three sources above are all resolved *before* a rule is compiled — literals
 when the rule is authored, bindings when the resolver builds it. Some values are
 known only **when the check runs**: the current tenant, an academic year, an
-as-of date. Warden reaches these with a fourth argument form, `@context <key>`,
+as-of date. Warrant reaches these with a fourth argument form, `@context <key>`,
 that stays symbolic in the rule and is filled from a `context:` array at check
 time:
 
@@ -808,7 +808,7 @@ unaffected.
 - If the key is **required** (the default), the check throws before compiling —
   for *every* check on the schema (see [Context keys](#context-keys)).
 - If it was declared **`required: false`**, the referencing condition is treated
-  as **false** — the same rule Warden applies to a targeted condition in a
+  as **false** — the same rule Warrant applies to a targeted condition in a
   no-target check. That is safe on a grant (no key, no grant), but on a `cannot`
   it makes the veto *lift* (fail-open), which is why only a grant-only frame
   should be opted out of required.
@@ -869,7 +869,7 @@ CONTEXT_REF = "@context" IDENTIFIER ;
 
 ### Syntax errors
 
-Malformed syntax throws `Warden\RuleSyntaxTree\WardenSyntaxException` eagerly,
+Malformed syntax throws `Warrant\RuleSyntaxTree\WarrantSyntaxException` eagerly,
 with the line, column, and a caret pointing at the offending token — debuggable
 even when the whole rule set is one line:
 
@@ -886,24 +886,24 @@ happens later, at **compile time**, when a rule set is compiled against a schema
 
 ---
 
-## Providing rules to Warden
+## Providing rules to Warrant
 
-Rules are data. Warden never invents them; it asks *your* resolver for them.
+Rules are data. Warrant never invents them; it asks *your* resolver for them.
 
 ### The `RuleResolver`
 
 Implement one interface. Given a context (the user, the resource's schema key, the
-schema class, and the model class), return the `WardenRuleSet` that governs this
+schema class, and the model class), return the `WarrantRuleSet` that governs this
 user's access to that resource.
 
 ```php
-use Warden\RuleResolutionContext;
-use Warden\RuleResolver;
-use Warden\RuleSyntaxTree\WardenRuleSet;
+use Warrant\RuleResolutionContext;
+use Warrant\RuleResolver;
+use Warrant\RuleSyntaxTree\WarrantRuleSet;
 
 class DatabaseRuleResolver implements RuleResolver
 {
-    public function resolve(RuleResolutionContext $context): WardenRuleSet
+    public function resolve(RuleResolutionContext $context): WarrantRuleSet
     {
         // $context->user               — the Authenticatable being checked
         // $context->schemaKey — e.g. 'timesheets'
@@ -915,7 +915,7 @@ class DatabaseRuleResolver implements RuleResolver
             ->where('resource', $context->schemaKey)
             ->pluck('rule');                    // ['if is_self they can view', ...]
 
-        return WardenRuleSet::fromSyntax(
+        return WarrantRuleSet::fromSyntax(
             $context->schemaKey,
             $grants->implode("\n"),             // rules concatenate freely
         );
@@ -923,56 +923,56 @@ class DatabaseRuleResolver implements RuleResolver
 }
 ```
 
-The resolver is where *your* access-control model meets Warden. Store rule strings in
+The resolver is where *your* access-control model meets Warrant. Store rule strings in
 a table, compose them from role flags, read them from JWT claims — whatever fits.
-Warden only cares that you return a `WardenRuleSet`.
+Warrant only cares that you return a `WarrantRuleSet`.
 
 ### Building a rule set
 
-Three ways to construct a `WardenRuleSet`:
+Three ways to construct a `WarrantRuleSet`:
 
 **From syntax** (parse a string, resolving bindings inline):
 
 ```php
-WardenRuleSet::fromSyntax('timesheets', 'if is_self they can view', $bindings = []);
+WarrantRuleSet::fromSyntax('timesheets', 'if is_self they can view', $bindings = []);
 ```
 
-**From already-parsed rules** — build individual `WardenRule`s and compose them.
+**From already-parsed rules** — build individual `WarrantRule`s and compose them.
 `fromRules` takes a variadic list *or* a single array, and accepts no bindings
 (the rules are already resolved):
 
 ```php
-use Warden\RuleSyntaxTree\WardenRule;
+use Warrant\RuleSyntaxTree\WarrantRule;
 
-$own      = WardenRule::fromSyntax('if is_self they can view, update');
-$noDelete = WardenRule::fromSyntax('they cannot delete');
+$own      = WarrantRule::fromSyntax('if is_self they can view, update');
+$noDelete = WarrantRule::fromSyntax('they cannot delete');
 
-WardenRuleSet::fromRules('timesheets', $own, $noDelete);
-WardenRuleSet::fromRules('timesheets', [$own, $noDelete]); // equivalent
+WarrantRuleSet::fromRules('timesheets', $own, $noDelete);
+WarrantRuleSet::fromRules('timesheets', [$own, $noDelete]); // equivalent
 ```
 
 **Directly with the parser**, if you want the parsed rules without a rule set:
 
 ```php
-use Warden\RuleSyntaxTree\Parsing\WardenParser;
+use Warrant\RuleSyntaxTree\Parsing\WarrantParser;
 
-$rules = WardenParser::parse('if is_self they can view', $bindings = []); // WardenRule[]
-$one   = WardenParser::parseSingleRule('they cannot delete');            // WardenRule
+$rules = WarrantParser::parse('if is_self they can view', $bindings = []); // WarrantRule[]
+$one   = WarrantParser::parseSingleRule('they cannot delete');            // WarrantRule
 ```
 
 ### Building rules programmatically
 
 When a rule's shape depends on runtime data — a list of department ids, a
 feature flag, values that don't belong in a string — a fluent builder is often
-clearer than assembling DSL text. `WardenRule::build()` returns a builder that
+clearer than assembling DSL text. `WarrantRule::build()` returns a builder that
 produces the **same AST** the parser does, so a built rule flows through the
 identical validation and compilation. Nothing is ever serialized to a string,
 so arbitrary PHP values in condition parameters survive untouched.
 
 ```php
-use Warden\RuleSyntaxTree\WardenRule;
+use Warrant\RuleSyntaxTree\WarrantRule;
 
-$rule = WardenRule::build()
+$rule = WarrantRule::build()
     ->if('is_self')
     ->orIf(fn ($c) => $c->if('is_manager')->andIf('in_region'))
     ->theyCan('view', 'update')
@@ -1020,7 +1020,7 @@ is `(a and b) or c`, not `a and (b or c)`.
 Fold a list inside a group, or branch with `when()`:
 
 ```php
-$rule = WardenRule::build()
+$rule = WarrantRule::build()
     ->if('is_self')
     ->orIf(function ($c) use ($departmentIds) {
         foreach ($departmentIds as $id) {
@@ -1047,10 +1047,10 @@ structurally:
 each via `toRule()`), so you don't have to call `toRule()` yourself:
 
 ```php
-WardenRuleSet::fromRules(
+WarrantRuleSet::fromRules(
     'timesheets',
-    WardenRule::build()->if('is_self')->theyCan('view', 'update'),
-    WardenRule::build()->theyCannot('delete'),
+    WarrantRule::build()->if('is_self')->theyCan('view', 'update'),
+    WarrantRule::build()->theyCannot('delete'),
 );
 ```
 
@@ -1064,15 +1064,15 @@ still evaluated against the *current* user via their conditions. Ideal for
 baseline guarantees — an admin escape hatch, or a suspension lockout:
 
 ```php
-use Warden\RuleSyntaxTree\WardenRule;
+use Warrant\RuleSyntaxTree\WarrantRule;
 
-class TimesheetSchema extends WardenSchema
+class TimesheetSchema extends WarrantSchema
 {
     protected function implicitRules(): array
     {
         return [
-            WardenRule::fromSyntax('if is_admin they can *'),
-            WardenRule::fromSyntax('if is_suspended they cannot *'),
+            WarrantRule::fromSyntax('if is_admin they can *'),
+            WarrantRule::fromSyntax('if is_suspended they cannot *'),
         ];
     }
 }
@@ -1083,16 +1083,16 @@ resolver-supplied `can`.
 
 ### Registering the resolver
 
-Warden ships **no** default resolver — you must configure one in
-`config/warden.php`, plus the list of schemas Warden should know about:
+Warrant ships **no** default resolver — you must configure one in
+`config/warrant.php`, plus the list of schemas Warrant should know about:
 
 ```php
 return [
-    'rule_resolver' => App\Warden\DatabaseRuleResolver::class,
+    'rule_resolver' => App\Warrant\DatabaseRuleResolver::class,
 
     'schemas' => [
-        App\Warden\TimesheetSchema::class,
-        App\Warden\ProjectSchema::class,
+        App\Warrant\TimesheetSchema::class,
+        App\Warrant\ProjectSchema::class,
     ],
 ];
 ```
@@ -1107,19 +1107,19 @@ helpers, or middleware.
 
 ### On the model
 
-Add the `HasWardenSchema` trait and point it at the schema:
+Add the `HasWarrantSchema` trait and point it at the schema:
 
 ```php
 use Illuminate\Database\Eloquent\Model;
-use Warden\HasWardenSchema;
+use Warrant\HasWarrantSchema;
 
 class Timesheet extends Model
 {
-    use HasWardenSchema;
+    use HasWarrantSchema;
 
-    public function wardenSchema(): string
+    public function warrantSchema(): string
     {
-        return App\Warden\TimesheetSchema::class;
+        return App\Warrant\TimesheetSchema::class;
     }
 }
 ```
@@ -1226,28 +1226,28 @@ combine:
 - **`AbilityMatchMode::ANY`** — *any* one is enough.
 
 ```php
-use Warden\AbilityMatchMode;
+use Warrant\AbilityMatchMode;
 
 Timesheet::query()->hasAbility(['view', 'approve'], matchMode: AbilityMatchMode::ANY)->get();
 ```
 
 ### Route middleware
 
-Warden registers a `warden` route middleware. Build the middleware string with
-`WardenMiddleware`:
+Warrant registers a `warrant` route middleware. Build the middleware string with
+`WarrantMiddleware`:
 
 ```php
-use Warden\WardenMiddleware;
+use Warrant\WarrantMiddleware;
 
 // Capability (no-target) — gate a create route by schema key:
-Route::post('/timesheets', ...)->middleware(WardenMiddleware::canCreate('timesheets'));
+Route::post('/timesheets', ...)->middleware(WarrantMiddleware::canCreate('timesheets'));
 
 // Targeted — gate by a route-model-bound parameter:
 Route::get('/timesheets/{timesheet}', ...)
-    ->middleware(WardenMiddleware::string('timesheet', 'view'));
+    ->middleware(WarrantMiddleware::string('timesheet', 'view'));
 
 // Group helper:
-WardenMiddleware::guard('timesheets', 'view', function () {
+WarrantMiddleware::guard('timesheets', 'view', function () {
     Route::get('/timesheets', ...);
 });
 ```
@@ -1261,7 +1261,7 @@ schema (by schema key or by the route-bound model's class) and calls
 
 ## How it compiles to SQL
 
-You don't need this section to use Warden, but it explains *why* the semantics
+You don't need this section to use Warrant, but it explains *why* the semantics
 are what they are.
 
 For each requested ability, the compiler assembles one predicate from all the
@@ -1301,16 +1301,16 @@ silently granting or denying.
 
 ## Testing
 
-Warden's own suite drives real SQLite and asserts on rows and ability lists
+Warrant's own suite drives real SQLite and asserts on rows and ability lists
 rather than SQL strings. The same approach works for your schemas: register a
-fake resolver that returns a fixed `WardenRuleSet`, seed a table, and assert what
+fake resolver that returns a fixed `WarrantRuleSet`, seed a table, and assert what
 comes back.
 
 ```php
 app()->instance(RuleResolver::class, new class implements RuleResolver {
-    public function resolve(RuleResolutionContext $context): WardenRuleSet
+    public function resolve(RuleResolutionContext $context): WarrantRuleSet
     {
-        return WardenRuleSet::fromSyntax($context->schemaKey, 'if is_self they can view');
+        return WarrantRuleSet::fromSyntax($context->schemaKey, 'if is_self they can view');
     }
 });
 
@@ -1322,7 +1322,7 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 
 ## API cheat sheet
 
-**Define a schema** — `extends Warden\Schema\WardenSchema`
+**Define a schema** — `extends Warrant\Schema\WarrantSchema`
 - `const model` — managed Eloquent model (or `''` for a capability schema)
 - `const schemaKey` — optional schema-key override
 - `#[Ability] const X = '...'` — declare an ability
@@ -1332,28 +1332,28 @@ expect($visible)->toContain($ownTimesheet->id)->not->toContain($othersTimesheet-
 - `protected function defaultContext(): array` — default check-time context
 
 **Build rules**
-- `WardenRuleSet::fromSyntax(string $entity, string $syntax, array $bindings = [])`
-- `WardenRuleSet::fromRules(string $entity, WardenRule|WardenRuleBuilder|array ...$rules)`
-- `WardenRule::fromSyntax(string $syntax, array $bindings = [])`
-- `WardenParser::parse(string $source, array $bindings = []): WardenRule[]`
-- `WardenParser::parseSingleRule(string $source, array $bindings = []): WardenRule`
-- `WardenRule::build()` — fluent builder: `->if/andIf/orIf/ifNot/…`, `->theyCan/theyCannot`, `->toRule()`
+- `WarrantRuleSet::fromSyntax(string $entity, string $syntax, array $bindings = [])`
+- `WarrantRuleSet::fromRules(string $entity, WarrantRule|WarrantRuleBuilder|array ...$rules)`
+- `WarrantRule::fromSyntax(string $syntax, array $bindings = [])`
+- `WarrantParser::parse(string $source, array $bindings = []): WarrantRule[]`
+- `WarrantParser::parseSingleRule(string $source, array $bindings = []): WarrantRule`
+- `WarrantRule::build()` — fluent builder: `->if/andIf/orIf/ifNot/…`, `->theyCan/theyCannot`, `->toRule()`
 
-**Provide rules** — implement `Warden\RuleResolver`
-- `resolve(RuleResolutionContext $context): WardenRuleSet`
+**Provide rules** — implement `Warrant\RuleResolver`
+- `resolve(RuleResolutionContext $context): WarrantRuleSet`
 - context: `->user`, `->schemaKey`, `->schema`, `->model`
-- register in `config/warden.php` → `rule_resolver`, `schemas`
+- register in `config/warrant.php` → `rule_resolver`, `schemas`
 
-**Check access** — `use Warden\HasWardenSchema` on the model
+**Check access** — `use Warrant\HasWarrantSchema` on the model
 - `Model::userHasAbilities($abilities, $target = null, $user = null, $matchMode = ALL, $context = []): bool`
 - `Model::getUserAbilities($target = null, $user = null, $context = []): array`
 - `->hasAbility($abilities, $user = null, $matchMode = ALL, $context = [])` — query scope
 - `->selectAbilities($user = null, $key = 'abilities', ?array $onlyAbilities = null, $context = [])` — query scope
 - `$model->loadAbilities($user = null, $key = 'abilities', $context = [])` — attach the ability list to an instance
 - `context:` — values for the rules' `@context` keys, merged over `defaultContext()`
-- `Warden\AbilityMatchMode::ALL | ANY`
+- `Warrant\AbilityMatchMode::ALL | ANY`
 
-**Middleware** — `Warden\WardenMiddleware`
+**Middleware** — `Warrant\WarrantMiddleware`
 - `::string($target, $abilities, $matchMode = ALL)`
 - `::guard($target, $abilities, Closure $routes, $matchMode = ALL)`
 - `::canView / canCreate / canUpdate / canDelete / canArchive / canManage($target, ?Closure)`

@@ -1,23 +1,23 @@
 <?php
 
-namespace Warden\Facades;
+namespace Warrant\Facades;
 
 use Illuminate\Support\Facades\Facade;
-use Warden\WardenManager;
+use Warrant\WarrantManager;
 
 /**
  * @method static string getSchemaForModelClass(string $modelClass)
  * @method static string getSchemaForKey(string $schemaKey)
- * @method static string resolveSchemaKey(\Illuminate\Database\Eloquent\Model|\Warden\Schema\WardenSchema|string $schema)
+ * @method static string resolveSchemaKey(\Illuminate\Database\Eloquent\Model|\Warrant\Schema\WarrantSchema|string $schema)
  * @method static array getNoTargetAbilitiesBag(\Illuminate\Contracts\Auth\Authenticatable|null $user = null, string ...$schemaClassesOrSchemaKeys)
  * @method static array registeredSchemas()
  *
- * @see \Warden\WardenManager
+ * @see \Warrant\WarrantManager
  */
-class Warden extends Facade
+class Warrant extends Facade
 {
     protected static function getFacadeAccessor(): string
     {
-        return WardenManager::class;
+        return WarrantManager::class;
     }
 }

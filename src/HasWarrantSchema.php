@@ -1,19 +1,19 @@
 <?php
 
-namespace Warden;
+namespace Warrant;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
-use Warden\Schema\WardenSchema;
+use Warrant\Schema\WarrantSchema;
 
-trait HasWardenSchema
+trait HasWarrantSchema
 {
     /**
-     * @return class-string<WardenSchema>
+     * @return class-string<WarrantSchema>
      */
-    abstract public function wardenSchema(): string;
+    abstract public function warrantSchema(): string;
 
     public static function userHasAbilities(
         string|array $abilities,
@@ -25,7 +25,7 @@ trait HasWardenSchema
     {
         /** @var Model&self $model */
         $model = new static;
-        $schemaClass = $model->wardenSchema();
+        $schemaClass = $model->warrantSchema();
 
         return $schemaClass::userHasAbilities($abilities, $target, $user, $matchMode, $context);
     }
@@ -44,7 +44,7 @@ trait HasWardenSchema
         array $context = []
     ): bool
     {
-        return $this->wardenSchema()::userHasAbilities($abilities, $this, $user, $matchMode, $context);
+        return $this->warrantSchema()::userHasAbilities($abilities, $this, $user, $matchMode, $context);
     }
 
     /**
@@ -58,7 +58,7 @@ trait HasWardenSchema
     {
         /** @var Model&self $model */
         $model = new static;
-        $schemaClass = $model->wardenSchema();
+        $schemaClass = $model->warrantSchema();
 
         return $schemaClass::getUserAbilities($target, $user, $context);
     }
@@ -72,7 +72,7 @@ trait HasWardenSchema
     ): EloquentBuilder
     {
         $model = $query->getModel();
-        $schema = $this->newWardenSchemaInstance($model);
+        $schema = $this->newWarrantSchemaInstance($model);
 
         $user ??= auth()->user();
 
@@ -105,7 +105,7 @@ trait HasWardenSchema
     ): EloquentBuilder
     {
         $model = $query->getModel();
-        $schema = $this->newWardenSchemaInstance($model);
+        $schema = $this->newWarrantSchemaInstance($model);
 
         $user ??= auth()->user();
 
@@ -134,7 +134,7 @@ trait HasWardenSchema
         array $context = []
     ): array
     {
-        $schemaClass = $this->wardenSchema();
+        $schemaClass = $this->warrantSchema();
 
         $user ??= auth()->user();
 
@@ -149,13 +149,13 @@ trait HasWardenSchema
         return $abilities;
     }
 
-    protected function newWardenSchemaInstance(Model $model): WardenSchema
+    protected function newWarrantSchemaInstance(Model $model): WarrantSchema
     {
-        $schemaClass = $model->wardenSchema();
+        $schemaClass = $model->warrantSchema();
 
-        if (!is_a($schemaClass, WardenSchema::class, true)) {
+        if (!is_a($schemaClass, WarrantSchema::class, true)) {
             throw new LogicException(
-                sprintf('Model [%s] must return a WardenSchema class string, got [%s].', $model::class, $schemaClass)
+                sprintf('Model [%s] must return a WarrantSchema class string, got [%s].', $model::class, $schemaClass)
             );
         }
 

@@ -1,23 +1,23 @@
 <?php
 
-namespace Warden\Schema;
+namespace Warrant\Schema;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
-use Warden\AbilityMatchMode;
-use Warden\RuleSyntaxTree\ConditionResolver;
-use Warden\RuleSyntaxTree\WardenRule;
-use Warden\Schema\Concerns\BuildsAccessQueries;
-use Warden\Schema\Concerns\ReflectsSchemaDefinition;
-use Warden\Schema\Concerns\ResolvesConditions;
+use Warrant\AbilityMatchMode;
+use Warrant\RuleSyntaxTree\ConditionResolver;
+use Warrant\RuleSyntaxTree\WarrantRule;
+use Warrant\Schema\Concerns\BuildsAccessQueries;
+use Warrant\Schema\Concerns\ReflectsSchemaDefinition;
+use Warrant\Schema\Concerns\ResolvesConditions;
 
 /**
- * A Warden schema declares the vocabulary a rule string may reference for one
+ * A Warrant schema declares the vocabulary a rule string may reference for one
  * entity: its abilities (`#[Ability]` constants) and its conditions
  * (`#[TargetedCondition]` / `#[GlobalCondition]` methods, which emit SQL). It is NOT where the
  * rules live — those come from the {@see RuleResolver} as a
- * {@see \Warden\RuleSyntaxTree\WardenRuleSet}, compiled against this schema.
+ * {@see \Warrant\RuleSyntaxTree\WarrantRuleSet}, compiled against this schema.
  *
  * The implementation is split across three concerns:
  *  - {@see ReflectsSchemaDefinition} — discovering abilities/conditions via reflection;
@@ -27,7 +27,7 @@ use Warden\Schema\Concerns\ResolvesConditions;
  * This class itself carries the configuration constants, the instance lifecycle,
  * and the static entry points callers reach for.
  */
-abstract class WardenSchema implements ConditionResolver
+abstract class WarrantSchema implements ConditionResolver
 {
     use ReflectsSchemaDefinition;
     use ResolvesConditions;
@@ -67,13 +67,13 @@ abstract class WardenSchema implements ConditionResolver
      * protected function implicitRules(): array
      * {
      *     return [
-     *         WardenRule::fromSyntax('if is_super_admin they can *'),
-     *         WardenRule::fromSyntax('if is_suspended they cannot *'),
+     *         WarrantRule::fromSyntax('if is_super_admin they can *'),
+     *         WarrantRule::fromSyntax('if is_suspended they cannot *'),
      *     ];
      * }
      * ```
      *
-     * @return array<int, WardenRule>
+     * @return array<int, WarrantRule>
      */
     protected function implicitRules(): array
     {
